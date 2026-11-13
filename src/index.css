@@ -1,0 +1,189 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    min-height: 100%;
+    max-height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: #08090c;
+    color: #f1f5f9;
+    font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  }
+}
+
+/* Custom sleek dark scrollbar for stage console */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0d1016;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #272d3d;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a435b;
+}
+
+@keyframes slideLineEnter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-line {
+  animation: slideLineEnter 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes lotusSpinSlow {
+  from {
+    transform: rotate(0deg) scale(0.96);
+  }
+  50% {
+    transform: rotate(180deg) scale(1.04);
+  }
+  to {
+    transform: rotate(360deg) scale(0.96);
+  }
+}
+
+@keyframes lotusBreathe {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.92;
+  }
+}
+
+@keyframes sacredWaveBar {
+  0%,
+  100% {
+    transform: scaleY(0.28);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 0.95;
+  }
+}
+
+@keyframes auroraGlowPulse {
+  0%,
+  100% {
+    transform: scale(0.88);
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1.16);
+    opacity: 0.92;
+  }
+}
+
+@keyframes fadeSoftIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-music-enter {
+  animation: fadeSoftIn 600ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-lotus-spin {
+  animation: lotusSpinSlow 24s linear infinite;
+}
+
+.animate-lotus-breathe {
+  animation: lotusBreathe 4.8s ease-in-out infinite;
+}
+
+.animate-aurora-pulse {
+  animation: auroraGlowPulse 5.2s ease-in-out infinite;
+}
+
+.stage-preview-container {
+  container-type: inline-size;
+}
+
+.cursor-hidden,
+.cursor-hidden * {
+  cursor: none !important;
+}
+
+/* WaveSurfer v7 horizontal scrollbar styling targeting Shadow DOM exportparts */
+#waveform ::part(scroll)::-webkit-scrollbar,
+.ws-container ::part(scroll)::-webkit-scrollbar,
+div[part~="scroll"]::-webkit-scrollbar {
+  height: 8px;
+  background: #0f172a;
+  border-radius: 9999px;
+}
+
+#waveform ::part(scroll)::-webkit-scrollbar-track,
+.ws-container ::part(scroll)::-webkit-scrollbar-track,
+div[part~="scroll"]::-webkit-scrollbar-track {
+  background: #0f172a;
+  border-radius: 9999px;
+}
+
+#waveform ::part(scroll)::-webkit-scrollbar-thumb,
+.ws-container ::part(scroll)::-webkit-scrollbar-thumb,
+div[part~="scroll"]::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 9999px;
+}
+
+#waveform ::part(scroll)::-webkit-scrollbar-thumb:hover,
+.ws-container ::part(scroll)::-webkit-scrollbar-thumb:hover,
+div[part~="scroll"]::-webkit-scrollbar-thumb:hover {
+  background: #f59e0b;
+}
+
+/* Sleek dark scrollbar utility for song lists and lyric timelines */
+.slim-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #334155 #0f172a;
+}
+.slim-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.slim-scrollbar::-webkit-scrollbar-track {
+  background: #0b0f19;
+  border-radius: 9999px;
+}
+.slim-scrollbar::-webkit-scrollbar-thumb {
+  background: #273549;
+  border-radius: 9999px;
+}
+.slim-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
