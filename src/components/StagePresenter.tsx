@@ -1,11 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Clock,
+  Columns,
   Eye,
   ListMusic,
   Monitor,
   Music,
   Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pause,
   Play,
   RotateCcw,
@@ -53,6 +56,10 @@ export const StagePresenter: React.FC = () => {
 
   const stageSetlistWidth = useUIStore((s) => s.stageSetlistWidth);
   const setStageSetlistWidth = useUIStore((s) => s.setStageSetlistWidth);
+  const stageSetlistCollapsed = useUIStore((s) => s.stageSetlistCollapsed);
+  const toggleStageSetlistCollapsed = useUIStore((s) => s.toggleStageSetlistCollapsed);
+  const stageLayoutMode = useUIStore((s) => s.stageLayoutMode);
+  const setStageLayoutMode = useUIStore((s) => s.setStageLayoutMode);
 
   const handleSetlistResizeStart = useCallback(
     (e: React.MouseEvent) => {
@@ -117,6 +124,12 @@ export const StagePresenter: React.FC = () => {
     return diff > 0 ? diff : 0;
   }, [nextLine, currentTime]);
 
+  const upcomingQueue = useMemo(() => {
+    if (!activeSong) return [];
+    const startIndex = Math.max(0, activeLineIndex + 1);
+    return activeSong.syncedLines.slice(startIndex, startIndex + 3);
+  }, [activeSong, activeLineIndex]);
+
   const emitPresentationIfChanged = useCallback((force = false) => {
     const song = activeSongRef.current;
     const idx = activeLineIdxRef.current;
@@ -167,7 +180,7 @@ export const StagePresenter: React.FC = () => {
     };
 
     if (settings.audioSinkId) {
-      engine.setOutputDevice(settings.audioSinkId).catch(() => {});
+      engine.setOutputDevice(settings.audioSinkId).catch(() => { });
     }
 
     return () => {
@@ -179,7 +192,7 @@ export const StagePresenter: React.FC = () => {
   // Apply output device sink changes
   useEffect(() => {
     if (engineRef.current) {
-      engineRef.current.setOutputDevice(settings.audioSinkId).catch(() => {});
+      engineRef.current.setOutputDevice(settings.audioSinkId).catch(() => { });
     }
   }, [settings.audioSinkId]);
 
@@ -306,7 +319,7 @@ export const StagePresenter: React.FC = () => {
       engine.seek(target.startTime);
       setCurrentTime(target.startTime);
       if (engine.isPaused()) {
-        engine.playWithFadeIn().catch(() => {});
+        engine.playWithFadeIn().catch(() => { });
         setIsPlaying(true);
       }
       activeLineIdxRef.current = idx;
@@ -388,286 +401,548 @@ export const StagePresenter: React.FC = () => {
   ]);
 
   return (
-    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-stage-bg text-slate-100">
+    <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-stage-bg text-slate-100 select-none">
       {/* Main Console Workspace: 2-Column Split */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
-        {/* Left Column: Song Library List */}
-        <div
-          style={{ width: `${stageSetlistWidth}px` }}
-          className="relative shrink-0 flex flex-col border-r border-stage-border bg-[#0a0c12] select-none"
-        >
-          <div className="flex items-center justify-between border-b border-stage-border px-4 py-3 bg-stage-panel/60">
-            <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-400">
-              <ListMusic className="h-4 w-4 text-amber-400" />
-              Gifts Setlist ({songs.length})
-            </span>
-            <span className="text-[11px] font-mono text-slate-500">
-              {activeSongIndex >= 0 ? `#${activeSongIndex + 1} Selected` : ''}
-            </span>
-          </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1.5 slim-scrollbar">
-            {songs.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center text-slate-500">
-                <Music className="mb-2 h-8 w-8 text-slate-600" />
-                <p className="text-xs">No songs in library</p>
-              </div>
-            ) : (
-              songs.map((song, idx) => {
-                const isSelected = song.id === activeSongId;
-                return (
-                  <button
-                    key={song.id}
-                    type="button"
-                    onClick={() => selectSong(song.id)}
-                    className={`flex w-full items-center justify-between rounded-xl border px-3.5 py-3 text-left transition-all ${
-                      isSelected
-                        ? 'border-amber-400/80 bg-amber-500/15 text-white shadow-[0_0_20px_rgba(245,185,66,0.1)]'
-                        : 'border-stage-border bg-stage-panel/40 text-slate-300 hover:border-slate-500 hover:bg-stage-panel'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span
-                        className={`font-mono text-xs font-bold w-6 shrink-0 ${
-                          isSelected ? 'text-amber-300' : 'text-slate-500'
-                        }`}
-                      >
-                        {String(idx + 1).padStart(2, '0')}
-                      </span>
-                      <span className="truncate text-sm font-semibold tracking-tight">
-                        {song.title}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0 pl-2">
-                      {isSelected && isPlaying && (
-                        <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                      )}
-                      <span className="font-mono text-xs text-slate-500">
-                        {formatClock(song.duration)}
-                      </span>
-                    </div>
-                  </button>
-                );
-              })
-            )}
-          </div>
-
-          {/* Interactive Drag Resizer Handle */}
+        {/* Left Column: Song Library Setlist */}
+        {!stageSetlistCollapsed && (
           <div
-            onMouseDown={handleSetlistResizeStart}
-            title="Drag to resize setlist panel"
-            className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:w-2 hover:bg-amber-500/60 transition-all z-20"
-          />
-        </div>
+            style={{ width: `${stageSetlistWidth}px` }}
+            className="relative shrink-0 flex flex-col border-r border-stage-border bg-[#0a0c12] select-none"
+          >
+            <div className="flex items-center justify-between border-b border-stage-border px-3.5 py-2.5 bg-stage-panel/60 shrink-0">
+              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
+                <ListMusic className="h-4 w-4 text-amber-400" />
+                Gifts Setlist ({songs.length})
+              </span>
+              <button
+                type="button"
+                onClick={toggleStageSetlistCollapsed}
+                title="Collapse Setlist Sidebar"
+                className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <PanelLeftClose className="h-3.5 w-3.5" />
+              </button>
+            </div>
 
-        {/* Right Column: Live Stage Prompter ("Currently Happening", "What's Next", 16:9 Mirror) */}
-        <div className="flex-1 min-h-0 overflow-y-auto p-6 flex flex-col gap-5 bg-gradient-to-b from-[#0b0d14] to-[#07080c] slim-scrollbar">
-          {/* Header Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stage-border pb-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-400">
-                <Monitor className="h-5 w-5" />
+            <div className="flex-1 min-h-0 overflow-y-auto p-2.5 space-y-1 slim-scrollbar">
+              {songs.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-center text-slate-500">
+                  <Music className="mb-2 h-7 w-7 text-slate-600" />
+                  <p className="text-xs">No songs in library</p>
+                </div>
+              ) : (
+                songs.map((song, idx) => {
+                  const isSelected = song.id === activeSongId;
+                  return (
+                    <button
+                      key={song.id}
+                      type="button"
+                      onClick={() => selectSong(song.id)}
+                      className={`flex w-full items-center justify-between rounded-xl border px-3 py-2.5 text-left transition-all ${
+                        isSelected
+                          ? 'border-amber-400/80 bg-amber-500/15 text-white shadow-[0_0_16px_rgba(245,185,66,0.1)] font-semibold'
+                          : 'border-transparent bg-stage-panel/30 text-slate-300 hover:border-slate-700 hover:bg-stage-panel'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className={`font-mono text-xs font-bold w-5 shrink-0 ${
+                            isSelected ? 'text-amber-300' : 'text-slate-500'
+                          }`}
+                        >
+                          {String(idx + 1).padStart(2, '0')}
+                        </span>
+                        <span className="truncate text-xs font-medium tracking-tight">
+                          {song.title}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 shrink-0 pl-1.5 font-mono text-[11px] text-slate-500">
+                        {isSelected && isPlaying && (
+                          <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
+                        )}
+                        <span>{formatClock(song.duration)}</span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Interactive Drag Resizer Handle */}
+            <div
+              onMouseDown={handleSetlistResizeStart}
+              title="Drag to resize setlist panel"
+              className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize hover:w-2 hover:bg-amber-500/60 transition-all z-20"
+            />
+          </div>
+        )}
+
+        {/* Right Column: Live Stage Prompter Command Center */}
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col overflow-hidden bg-gradient-to-b from-[#0b0d14] to-[#07080c]">
+          {/* Header Bar: Streamlined & Single-Row */}
+          <div className="flex flex-nowrap items-center justify-between gap-3 border-b border-stage-border/80 bg-stage-panel/30 px-4 py-2 shrink-0 select-none min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0 shrink">
+              {stageSetlistCollapsed && (
+                <button
+                  type="button"
+                  onClick={toggleStageSetlistCollapsed}
+                  title="Expand Setlist Sidebar"
+                  className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1 text-xs font-semibold text-slate-300 hover:border-amber-500/50 hover:text-white transition-all shrink-0 active:scale-95"
+                >
+                  <PanelLeftOpen className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Setlist ({songs.length})</span>
+                </button>
+              )}
+
+              <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-amber-500/15 border border-amber-500/40 text-amber-400 shrink-0">
+                <Monitor className="h-4 w-4" />
               </div>
-              <div>
-                <h1 className="text-xl font-bold text-white tracking-wide">
+
+              <div className="min-w-0 truncate">
+                <h1 className="text-sm sm:text-base font-bold text-white tracking-wide truncate">
                   {activeSong?.title || 'No Song Selected'}
                 </h1>
-                <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-2">
-                  <span>{activeSong?.syncedLines.length || 0} Lyric Slides</span>
+                <p className="text-[11px] text-slate-400 flex items-center gap-1.5 truncate">
+                  <span className="font-mono text-amber-300 font-semibold">
+                    {isMusicInterlude
+                      ? '♪ Instrumental Music'
+                      : `Slide ${(activeLineIndex >= 0 ? activeLineIndex : 0) + 1} of ${activeSong?.syncedLines.length || 0}`}
+                  </span>
                   <span>•</span>
                   <span>Duration: {formatClock(activeSong?.duration || 0)}</span>
                 </p>
               </div>
             </div>
 
-            {/* Live Status Indicators */}
-            <div className="flex items-center gap-3">
+            {/* Right Controls: View Switcher, Live Status, Master Clock */}
+            <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              {/* Layout Mode Pills */}
+              <div className="hidden sm:flex items-center rounded-xl border border-stage-border bg-black/40 p-0.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setStageLayoutMode('split')}
+                  title="Split View: Dual prompter cards + Live 16:9 mirror side-by-side"
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                    stageLayoutMode === 'split'
+                      ? 'border border-amber-500/60 bg-amber-500/20 text-amber-300 font-bold shadow-[0_0_12px_rgba(245,185,66,0.2)]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Columns className="h-3 w-3" />
+                  <span>Split</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStageLayoutMode('prompter')}
+                  title="Prompter Focus: Maximized prompter cards for performers"
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                    stageLayoutMode === 'prompter'
+                      ? 'border border-amber-500/60 bg-amber-500/20 text-amber-300 font-bold shadow-[0_0_12px_rgba(245,185,66,0.2)]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Eye className="h-3 w-3" />
+                  <span>Prompter</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setStageLayoutMode('mirror')}
+                  title="Output Feed: Maximized audience mirror for visual director"
+                  className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-semibold transition-all ${
+                    stageLayoutMode === 'mirror'
+                      ? 'border border-amber-500/60 bg-amber-500/20 text-amber-300 font-bold shadow-[0_0_12px_rgba(245,185,66,0.2)]'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <Tv className="h-3 w-3" />
+                  <span>Output Feed</span>
+                </button>
+              </div>
+
+              {/* Status Badge */}
               <div
-                className={`flex items-center gap-2 rounded-xl border px-3.5 py-1.5 text-xs font-semibold ${
+                className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                   isPresenting
-                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_16px_rgba(16,185,129,0.15)]'
+                    ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300 shadow-[0_0_14px_rgba(16,185,129,0.15)]'
                     : 'border-slate-700 bg-black/40 text-slate-400'
                 }`}
               >
                 <span
-                  className={`h-2 w-2 rounded-full ${
-                    isPresenting ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'
-                  }`}
+                  className={`h-2 w-2 rounded-full ${isPresenting ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`}
                 />
-                {isPresenting
-                  ? isPreviewFallback
-                    ? '16:9 Stage Preview Active'
-                    : 'Audience Projector Live'
-                  : 'Audience Screen Idle'}
+                <span className="hidden md:inline">
+                  {isPresenting
+                    ? isPreviewFallback
+                      ? '16:9 Preview Active'
+                      : 'Audience Display Live'
+                    : 'Audience Screen Idle'}
+                </span>
               </div>
 
-              <div className="flex items-center gap-1.5 font-mono text-sm rounded-xl border border-stage-border bg-black/50 px-3.5 py-1.5 text-amber-300">
-                <Clock className="h-4 w-4 text-amber-400" />
-                <strong>{formatClock(currentTime)}</strong>
-                <span className="text-slate-500">/</span>
-                <span className="text-slate-400">{formatClock(activeSong?.duration || 0)}</span>
+              {/* Master Time Clock */}
+              <div className="flex items-center gap-1 font-mono text-xs sm:text-sm rounded-xl border border-stage-border bg-black/50 px-3 py-1 text-amber-300 font-bold shrink-0">
+                <Clock className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                <span>{formatClock(currentTime)}</span>
+                <span className="text-slate-500 font-normal">/</span>
+                <span className="text-slate-400 font-normal text-xs">{formatClock(activeSong?.duration || 0)}</span>
               </div>
             </div>
           </div>
 
-          {/* Cards Grid: "Currently Happening" and "What's Next" */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Card 1: CURRENTLY ON AUDIENCE SCREEN */}
-            <div className="flex flex-col rounded-3xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-500/15 via-[#0d1017] to-[#090b10] p-5 shadow-[0_0_36px_rgba(245,185,66,0.1)] transition-all">
-              <div className="flex items-center justify-between border-b border-amber-500/25 pb-3">
-                <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-300">
-                  <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
-                  Currently On Audience Screen
-                </span>
-                <span className="rounded-full bg-amber-400/20 border border-amber-400/50 px-2.5 py-0.5 text-xs font-bold font-mono text-amber-200">
-                  {isMusicInterlude
-                    ? '♪ Instrumental Music'
-                    : `Slide #${(activeLineIndex >= 0 ? activeLineIndex : 0) + 1} / ${
-                        activeSong?.syncedLines.length || 0
-                      }`}
-                </span>
-              </div>
-
-              <div className="flex-1 flex flex-col items-center justify-center py-6 text-center min-h-[140px]">
-                {isMusicInterlude ? (
-                  <div className="space-y-2 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-center gap-1.5 text-sky-400">
-                      <Music2 className="h-7 w-7 animate-pulse" />
-                      <span className="flex gap-1">
-                        <span className="h-4 w-1 bg-sky-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                        <span className="h-6 w-1 bg-sky-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                        <span className="h-5 w-1 bg-sky-400 rounded-full animate-bounce [animation-delay:300ms]" />
+          {/* Main Stage Viewport (100% Zero-Scroll Viewport) */}
+          <div className="flex-1 min-h-0 min-w-0 p-3 sm:p-3.5 overflow-hidden">
+            {stageLayoutMode === 'split' ? (
+              /* Split View: Prompter Deck (Left) + 16:9 Live Output Mirror (Right) */
+              <div className="h-full w-full flex flex-col md:flex-row gap-3 min-h-0 min-w-0 overflow-hidden">
+                {/* Left: Prompter Cards Stack */}
+                <div className="flex-1 min-h-0 min-w-0 flex flex-col gap-2.5 h-full overflow-hidden">
+                  {/* Card 1: CURRENTLY ON AUDIENCE SCREEN */}
+                  <div className="flex-[1.2] min-h-0 flex flex-col justify-between rounded-2xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-500/15 via-[#0d1017] to-[#090b10] p-3.5 sm:p-4 shadow-[0_0_28px_rgba(245,185,66,0.12)] overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-amber-500/25 pb-2 shrink-0">
+                      <span className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                        <Sparkles className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
+                        Currently On Audience Screen
+                      </span>
+                      <span className="rounded-full bg-amber-400/20 border border-amber-400/50 px-2.5 py-0.5 text-[11px] font-bold font-mono text-amber-200">
+                        {isMusicInterlude
+                          ? '♪ Instrumental Music'
+                          : `Slide #${(activeLineIndex >= 0 ? activeLineIndex : 0) + 1} / ${activeSong?.syncedLines.length || 0}`}
                       </span>
                     </div>
-                    <div className="text-lg font-bold text-sky-200">
-                      Sacred Instrumental Music Animation Active
-                    </div>
-                    <p className="text-xs text-slate-400 max-w-sm">
-                      {activeLineIndex < 0
-                        ? 'Intro solo playing — active lyrics will appear when singing begins.'
-                        : 'Interlude gap — holding serene lotus visual on stadium display.'}
-                    </p>
-                  </div>
-                ) : currentLine ? (
-                  <div className="space-y-2 animate-in fade-in zoom-in-95 duration-150">
-                    <div className="text-2xl lg:text-3xl font-extrabold text-amber-100 tracking-wide drop-shadow-[0_2px_12px_rgba(245,185,66,0.35)] leading-relaxed">
-                      "{currentLine.text}"
-                    </div>
-                    <div className="font-mono text-xs text-amber-300/80">
-                      Timing: {formatClock(currentLine.startTime)} → {formatClock(currentLine.endTime)} •{' '}
-                      {(currentLine.endTime - currentLine.startTime).toFixed(1)}s
-                    </div>
-                  </div>
-                ) : (
-                  <div className="text-slate-500 text-sm">
-                    Press Play or Spacebar to start stage presentation
-                  </div>
-                )}
-              </div>
 
-              {/* Progress bar for active line */}
-              {currentLine && isPlaying && (
-                <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className="bg-amber-400 h-full transition-all duration-75 rounded-full"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Math.max(
-                          0,
-                          ((currentTime - currentLine.startTime) /
-                            Math.max(0.1, currentLine.endTime - currentLine.startTime)) *
-                            100,
-                        ),
-                      )}%`,
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Card 2: WHAT'S NEXT (UPCOMING SLIDE) */}
-            <div className="flex flex-col rounded-3xl border border-sky-500/40 bg-gradient-to-b from-sky-500/10 via-[#0a0d15] to-[#07090e] p-5 shadow-lg">
-              <div className="flex items-center justify-between border-b border-sky-500/20 pb-3">
-                <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-300">
-                  <Eye className="h-4 w-4 text-sky-400" />
-                  Upcoming Next (Get Ready)
-                </span>
-                <span className="rounded-full bg-sky-500/20 border border-sky-400/40 px-2.5 py-0.5 text-xs font-bold font-mono text-sky-200">
-                  {nextLine ? `Next #${activeLineIndex + 2}` : 'End of Song'}
-                </span>
-              </div>
-
-              <div className="flex-1 flex flex-col items-center justify-center py-6 text-center min-h-[140px]">
-                {nextLine ? (
-                  <div className="space-y-2.5">
-                    <div className="text-lg lg:text-xl font-bold text-slate-100 tracking-wide">
-                      "{nextLine.text}"
+                    <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-2 text-center overflow-hidden">
+                      {isMusicInterlude ? (
+                        <div className="space-y-1.5 animate-in fade-in duration-200">
+                          <div className="flex items-center justify-center gap-1.5 text-sky-400">
+                            <Music2 className="h-6 w-6 animate-pulse" />
+                            <span className="flex gap-1 items-end h-5">
+                              <span className="h-3 w-1 bg-sky-400 rounded-full animate-bounce [animation-delay:0ms]" />
+                              <span className="h-5 w-1 bg-sky-400 rounded-full animate-bounce [animation-delay:150ms]" />
+                              <span className="h-4 w-1 bg-sky-400 rounded-full animate-bounce [animation-delay:300ms]" />
+                            </span>
+                          </div>
+                          <div className="text-base sm:text-lg font-bold text-sky-200">
+                            Sacred Instrumental Music Animation Active
+                          </div>
+                          <p className="text-[11px] text-slate-400 max-w-sm line-clamp-2">
+                            {activeLineIndex < 0
+                              ? 'Intro solo playing — active lyrics will appear when singing begins.'
+                              : 'Interlude gap — holding serene lotus visual on stage display.'}
+                          </p>
+                        </div>
+                      ) : currentLine ? (
+                        <div className="space-y-1.5 animate-in fade-in zoom-in-95 duration-150 w-full px-2">
+                          <div className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-amber-100 tracking-wide drop-shadow-[0_2px_12px_rgba(245,185,66,0.35)] leading-snug line-clamp-3">
+                            &ldquo;{currentLine.text}&rdquo;
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-slate-500 text-xs sm:text-sm">
+                          Press PLAY STAGE or Spacebar to begin presentation
+                        </div>
+                      )}
                     </div>
-                    <div className="flex items-center justify-center gap-3 text-xs font-mono">
-                      <span className="text-sky-300 font-semibold">
-                        Starts at {formatClock(nextLine.startTime)}
-                      </span>
-                      {timeUntilNext !== null && (
-                        <>
-                          <span className="text-slate-600">•</span>
-                          <span className="rounded-md bg-sky-400/20 border border-sky-400/40 px-2 py-0.5 text-sky-200 font-bold">
-                            in {timeUntilNext.toFixed(1)}s
-                          </span>
-                        </>
+
+                    <div className="pt-2 shrink-0 border-t border-amber-500/15 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-mono text-amber-300/80">
+                        {currentLine ? (
+                          <>
+                            <span>Timing: {formatClock(currentLine.startTime)} → {formatClock(currentLine.endTime)}</span>
+                            <span>{(currentLine.endTime - currentLine.startTime).toFixed(1)}s</span>
+                          </>
+                        ) : (
+                          <span className="text-slate-500">Ready</span>
+                        )}
+                      </div>
+                      {currentLine && isPlaying && (
+                        <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+                          <div
+                            className="bg-amber-400 h-full transition-all duration-75 rounded-full shadow-[0_0_8px_rgba(245,185,66,0.6)]"
+                            style={{
+                              width: `${Math.min(
+                                100,
+                                Math.max(
+                                  0,
+                                  ((currentTime - currentLine.startTime) /
+                                    Math.max(0.1, currentLine.endTime - currentLine.startTime)) *
+                                    100,
+                                ),
+                              )}%`,
+                            }}
+                          />
+                        </div>
                       )}
                     </div>
                   </div>
-                ) : (
-                  <div className="text-slate-400 text-sm italic">
-                    — Final line complete / Outro Music —
+
+                  {/* Card 2: UPCOMING NEXT (GET READY) */}
+                  <div className="flex-1 min-h-0 flex flex-col justify-between rounded-2xl border border-sky-500/40 bg-gradient-to-b from-sky-500/10 via-[#0a0d15] to-[#07090e] p-3 sm:p-3.5 shadow-md overflow-hidden">
+                    <div className="flex items-center justify-between border-b border-sky-500/20 pb-2 shrink-0">
+                      <span className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-wider text-sky-300">
+                        <Eye className="h-3.5 w-3.5 text-sky-400" />
+                        Upcoming Next (Get Ready)
+                      </span>
+                      <span className="rounded-full bg-sky-500/20 border border-sky-400/40 px-2 py-0.5 text-[11px] font-bold font-mono text-sky-200">
+                        {nextLine ? `Next #${activeLineIndex + 2}` : 'End of Song'}
+                      </span>
+                    </div>
+
+                    <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-1.5 text-center overflow-hidden w-full px-2">
+                      {nextLine ? (
+                        <div className="space-y-1.5 w-full">
+                          <div className="text-base sm:text-lg lg:text-xl font-bold text-slate-100 tracking-wide line-clamp-2">
+                            &ldquo;{nextLine.text}&rdquo;
+                          </div>
+                          <div className="flex items-center justify-center gap-2 text-xs font-mono">
+                            <span className="text-sky-300 font-semibold">
+                              Starts at {formatClock(nextLine.startTime)}
+                            </span>
+                            {timeUntilNext !== null && (
+                              <span className="rounded-md bg-sky-400/20 border border-sky-400/40 px-1.5 py-0.2 text-sky-200 font-bold text-[10px]">
+                                in {timeUntilNext.toFixed(1)}s
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-slate-400 text-xs italic">
+                          — Outro Music / Final Slide Complete —
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="pt-1.5 text-center text-[10px] text-slate-500 border-t border-white/5 shrink-0">
+                      Press <kbd className="rounded bg-white/10 px-1 py-0.5 font-mono text-slate-300">↓</kbd> to skip directly to next slide
+                    </div>
                   </div>
-                )}
+                </div>
+
+                {/* Right: LIVE 16:9 AUDIENCE OUTPUT MIRROR */}
+                <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full rounded-2xl border border-stage-border bg-[#090b10] p-3 shadow-xl overflow-hidden justify-between">
+                  <div className="flex items-center justify-between pb-2 border-b border-stage-border/60 shrink-0">
+                    <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300 truncate">
+                      <Tv className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+                      <span className="truncate">Live 16:9 Projector Mirror</span>
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded border border-stage-border shrink-0">
+                      {activeSong?.styleConfig.musicAnimation || 'lotus-pulse'}
+                    </span>
+                  </div>
+
+                  {/* 16:9 Screen Fit Viewport */}
+                  <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center p-1 overflow-hidden">
+                    <div
+                      className="relative rounded-xl overflow-hidden border border-white/10 bg-black shadow-2xl"
+                      style={{
+                        aspectRatio: '16 / 9',
+                        maxHeight: '100%',
+                        maxWidth: '100%',
+                        height: 'auto',
+                        width: 'auto',
+                      }}
+                    >
+                      <SlideRenderer
+                        activeLine={currentLine}
+                        styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
+                        isBlank={isBlank}
+                        isMusicInterlude={isMusicInterlude}
+                        isPreview={true}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Forward Situational Queue */}
+                  {upcomingQueue.length > 0 && (
+                    <div className="pt-2 border-t border-white/5 flex items-center gap-2 overflow-hidden shrink-0 text-[11px]">
+                      <span className="text-slate-500 font-mono uppercase tracking-wider text-[9px] shrink-0">
+                        Up Next:
+                      </span>
+                      <div className="flex-1 flex gap-2 overflow-hidden">
+                        {upcomingQueue.slice(0, 2).map((qLine) => (
+                          <div
+                            key={qLine.id}
+                            className="flex-1 min-w-0 truncate rounded-lg border border-slate-800 bg-black/40 px-2 py-0.5 text-slate-300 text-[10px]"
+                          >
+                            <span className="font-mono text-amber-400/80 mr-1">{formatClock(qLine.startTime)}</span>
+                            <span className="truncate">{qLine.text}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
+            ) : stageLayoutMode === 'prompter' ? (
+              /* Prompter Focus: Wide Dual Cards + Floating PiP Mirror */
+              <div className="h-full w-full flex flex-col md:flex-row gap-3 min-h-0 min-w-0 overflow-hidden relative">
+                {/* Current Slide Card (Maximized) */}
+                <div className="flex-1 min-h-0 flex flex-col justify-between rounded-2xl border-2 border-amber-400/80 bg-gradient-to-b from-amber-500/15 via-[#0d1017] to-[#090b10] p-4 shadow-xl overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-amber-500/25 pb-2 shrink-0">
+                    <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-amber-300">
+                      <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
+                      Currently On Audience Screen
+                    </span>
+                    <span className="rounded-full bg-amber-400/20 border border-amber-400/50 px-2.5 py-0.5 text-xs font-bold font-mono text-amber-200">
+                      {isMusicInterlude
+                        ? '♪ Instrumental Music'
+                        : `Slide #${(activeLineIndex >= 0 ? activeLineIndex : 0) + 1} / ${activeSong?.syncedLines.length || 0}`}
+                    </span>
+                  </div>
 
-              <div className="pt-2 text-center text-[11px] text-slate-500 border-t border-white/5">
-                Press <kbd className="rounded bg-white/10 px-1 py-0.5 font-mono text-slate-300">↓</kbd> to skip directly to next slide
+                  <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-4 text-center overflow-hidden">
+                    {isMusicInterlude ? (
+                      <div className="space-y-2 animate-in fade-in duration-200">
+                        <Music2 className="h-8 w-8 text-sky-400 mx-auto animate-pulse" />
+                        <div className="text-xl font-bold text-sky-200">
+                          Sacred Instrumental Music Animation Active
+                        </div>
+                      </div>
+                    ) : currentLine ? (
+                      <div className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-amber-100 tracking-wide drop-shadow-[0_2px_14px_rgba(245,185,66,0.4)] leading-tight">
+                        &ldquo;{currentLine.text}&rdquo;
+                      </div>
+                    ) : (
+                      <div className="text-slate-500 text-sm">Press Spacebar to play</div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 shrink-0 border-t border-amber-500/15 space-y-1.5">
+                    <div className="flex items-center justify-between text-xs font-mono text-amber-300/80">
+                      {currentLine && (
+                        <>
+                          <span>Timing: {formatClock(currentLine.startTime)} → {formatClock(currentLine.endTime)}</span>
+                          <span>{(currentLine.endTime - currentLine.startTime).toFixed(1)}s</span>
+                        </>
+                      )}
+                    </div>
+                    {currentLine && isPlaying && (
+                      <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
+                        <div
+                          className="bg-amber-400 h-full transition-all duration-75 rounded-full"
+                          style={{
+                            width: `${Math.min(
+                              100,
+                              Math.max(
+                                0,
+                                ((currentTime - currentLine.startTime) /
+                                  Math.max(0.1, currentLine.endTime - currentLine.startTime)) *
+                                  100,
+                              ),
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Upcoming Next Card */}
+                <div className="flex-1 min-h-0 flex flex-col justify-between rounded-2xl border border-sky-500/40 bg-gradient-to-b from-sky-500/10 via-[#0a0d15] to-[#07090e] p-4 shadow-md overflow-hidden">
+                  <div className="flex items-center justify-between border-b border-sky-500/20 pb-2 shrink-0">
+                    <span className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-sky-300">
+                      <Eye className="h-4 w-4 text-sky-400" />
+                      Upcoming Next (Get Ready)
+                    </span>
+                    <span className="rounded-full bg-sky-500/20 border border-sky-400/40 px-2.5 py-0.5 text-xs font-bold font-mono text-sky-200">
+                      {nextLine ? `Next #${activeLineIndex + 2}` : 'End'}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 min-h-0 flex flex-col items-center justify-center py-4 text-center overflow-hidden">
+                    {nextLine ? (
+                      <div className="space-y-2">
+                        <div className="text-xl sm:text-2xl font-bold text-slate-100 tracking-wide">
+                          &ldquo;{nextLine.text}&rdquo;
+                        </div>
+                        <div className="font-mono text-xs text-sky-300">
+                          Starts at {formatClock(nextLine.startTime)}
+                          {timeUntilNext !== null && ` • in ${timeUntilNext.toFixed(1)}s`}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-slate-400 text-sm italic">— Final Slide Complete —</div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 text-center text-xs text-slate-500 border-t border-white/5 shrink-0">
+                    Press <kbd className="rounded bg-white/10 px-1 py-0.5 font-mono text-slate-300">↓</kbd> to skip directly
+                  </div>
+                </div>
+
+                {/* Picture-in-Picture Mini 16:9 Mirror */}
+                <div className="hidden xl:block absolute bottom-4 right-4 w-48 aspect-video rounded-xl overflow-hidden border border-white/20 bg-black shadow-2xl z-20 pointer-events-none">
+                  <SlideRenderer
+                    activeLine={currentLine}
+                    styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
+                    isBlank={isBlank}
+                    isMusicInterlude={isMusicInterlude}
+                    isPreview={true}
+                  />
+                </div>
               </div>
-            </div>
-          </div>
+            ) : (
+              /* Mirror Focus: Maximized 16:9 Output Screen */
+              <div className="h-full w-full flex flex-col gap-2.5 min-h-0 min-w-0 overflow-hidden">
+                <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center p-2 rounded-2xl border border-stage-border bg-[#090b10] overflow-hidden">
+                  <div
+                    className="relative rounded-2xl overflow-hidden border border-white/10 bg-black shadow-2xl"
+                    style={{
+                      aspectRatio: '16 / 9',
+                      maxHeight: '100%',
+                      maxWidth: '100%',
+                      height: 'auto',
+                      width: 'auto',
+                    }}
+                  >
+                    <SlideRenderer
+                      activeLine={currentLine}
+                      styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
+                      isBlank={isBlank}
+                      isMusicInterlude={isMusicInterlude}
+                      isPreview={true}
+                    />
+                  </div>
+                </div>
 
-          {/* 16:9 Live Audience Screen Mirror */}
-          <div className="flex flex-col rounded-3xl border border-stage-border bg-[#090b10] p-4 shadow-xl">
-            <div className="flex items-center justify-between mb-3 px-2">
-              <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300">
-                <Tv className="h-4 w-4 text-amber-400" />
-                Live 16:9 Audience Output Mirror (Exact Projector Feed)
-              </span>
-              <span className="text-[11px] text-slate-500 font-mono">
-                {activeSong?.styleConfig.musicAnimation || 'lotus-pulse'}
-              </span>
-            </div>
-
-            <div className="aspect-[16/9] w-full max-w-2xl mx-auto rounded-2xl overflow-hidden border border-white/10 bg-black shadow-2xl relative">
-              <SlideRenderer
-                activeLine={currentLine}
-                styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
-                isBlank={isBlank}
-                isMusicInterlude={isMusicInterlude}
-                isPreview={true}
-              />
-            </div>
+                {/* Bottom Compact Prompter Strip */}
+                <div className="shrink-0 flex items-center gap-3 rounded-xl border border-amber-500/40 bg-black/60 px-4 py-2 text-xs">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold shrink-0">
+                    <Sparkles className="h-3.5 w-3.5 animate-pulse" />
+                    <span>Active:</span>
+                  </div>
+                  <div className="flex-1 truncate text-amber-100 font-bold">
+                    {isMusicInterlude ? '♪ Instrumental Music Animation Active' : currentLine?.text || 'Idle'}
+                  </div>
+                  {nextLine && (
+                    <div className="flex items-center gap-2 text-slate-400 text-xs shrink-0 pl-3 border-l border-white/10">
+                      <span className="text-sky-300 font-semibold">Next:</span>
+                      <span className="truncate max-w-[200px] text-slate-200">&ldquo;{nextLine.text}&rdquo;</span>
+                      <span className="font-mono text-sky-400">({formatClock(nextLine.startTime)})</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Bottom Transport Dock: Full Stage Controls */}
-      <div className="border-t border-stage-border bg-stage-panel px-6 py-4">
-        <div className="mx-auto flex max-w-4xl items-center justify-between gap-4">
+      <div className="border-t border-stage-border bg-stage-panel/95 px-4 sm:px-6 py-2.5 shrink-0 select-none">
+        <div className="mx-auto flex max-w-4xl items-center justify-between gap-2 sm:gap-4">
           <button
             type="button"
             disabled={activeSongIndex <= 0}
             onClick={handlePrevSong}
-            className="flex items-center gap-2 rounded-2xl border border-stage-border bg-stage-card px-4 py-3 text-xs font-bold text-slate-100 hover:border-amber-500/50 hover:bg-white/10 disabled:opacity-30 transition-all active:scale-95"
+            className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3 sm:px-4 py-2 text-xs font-bold text-slate-100 hover:border-amber-500/50 hover:bg-white/10 disabled:opacity-30 transition-all active:scale-95"
           >
-            <SkipBack className="h-4 w-4" />
-            Previous Song
+            <SkipBack className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">Previous Song</span>
+            <span className="sm:hidden">Prev</span>
           </button>
 
           <button
@@ -675,24 +950,33 @@ export const StagePresenter: React.FC = () => {
             onClick={handleReplayCurrentLine}
             disabled={!activeSong || activeSong.syncedLines.length === 0}
             title="Replay active lyric line from start (R)"
-            className="flex items-center gap-1.5 rounded-2xl border border-stage-border bg-stage-card px-4 py-3 text-xs font-bold text-amber-300 hover:border-amber-500/50 hover:bg-amber-500/10 disabled:opacity-30 transition-all active:scale-95"
+            className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3 sm:px-4 py-2 text-xs font-bold text-amber-300 hover:border-amber-500/50 hover:bg-amber-500/10 disabled:opacity-30 transition-all active:scale-95"
           >
-            <RotateCcw className="h-4 w-4" />
-            Replay Line (R)
+            <RotateCcw className="h-3.5 w-3.5" />
+            <span>Replay (R)</span>
           </button>
 
           <button
             type="button"
             disabled={!activeSong}
             onClick={handleTogglePlayPause}
-            className={`flex flex-1 max-w-[260px] items-center justify-center gap-2.5 rounded-2xl px-8 py-3.5 text-base font-extrabold shadow-xl transition-all active:scale-95 disabled:opacity-30 ${
+            className={`flex flex-1 max-w-[240px] items-center justify-center gap-2 rounded-xl px-6 py-2 text-sm sm:text-base font-extrabold shadow-xl transition-all active:scale-95 disabled:opacity-30 ${
               isPlaying
-                ? 'bg-amber-400 text-black hover:bg-amber-300 shadow-[0_0_24px_rgba(245,185,66,0.25)]'
-                : 'bg-emerald-500 text-black hover:bg-emerald-400 shadow-[0_0_24px_rgba(16,185,129,0.25)]'
+                ? 'bg-amber-400 text-black hover:bg-amber-300 shadow-[0_0_20px_rgba(245,185,66,0.25)]'
+                : 'bg-emerald-500 text-black hover:bg-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.25)]'
             }`}
           >
-            {isPlaying ? <Pause className="h-5 w-5 fill-current" /> : <Play className="h-5 w-5 fill-current" />}
-            {isPlaying ? 'PAUSE (Space)' : 'PLAY STAGE (Space)'}
+            {isPlaying ? (
+              <>
+                <Pause className="h-4 w-4 sm:h-5 sm:w-5 fill-current" />
+                <span>PAUSE (Space)</span>
+              </>
+            ) : (
+              <>
+                <Play className="h-4 w-4 sm:h-5 sm:w-5 fill-current" />
+                <span>PLAY STAGE (Space)</span>
+              </>
+            )}
           </button>
 
           <button
@@ -700,20 +984,21 @@ export const StagePresenter: React.FC = () => {
             onClick={handleNextLine}
             disabled={!activeSong || activeLineIndex >= activeSong.syncedLines.length - 1}
             title="Advance immediately to next lyric line (Down Arrow ↓)"
-            className="flex items-center gap-1.5 rounded-2xl border border-stage-border bg-stage-card px-4 py-3 text-xs font-bold text-slate-100 hover:border-amber-500/50 hover:bg-white/10 disabled:opacity-30 transition-all active:scale-95"
+            className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3 sm:px-4 py-2 text-xs font-bold text-slate-100 hover:border-amber-500/50 hover:bg-white/10 disabled:opacity-30 transition-all active:scale-95"
           >
-            Next Line (↓)
-            <SkipForward className="h-4 w-4" />
+            <span>Next Line (↓)</span>
+            <SkipForward className="h-3.5 w-3.5" />
           </button>
 
           <button
             type="button"
             disabled={activeSongIndex < 0 || activeSongIndex >= songs.length - 1}
             onClick={handleNextSong}
-            className="flex items-center gap-2 rounded-2xl border border-stage-border bg-stage-card px-4 py-3 text-xs font-bold text-slate-100 hover:border-amber-500/50 hover:bg-white/10 disabled:opacity-30 transition-all active:scale-95"
+            className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3 sm:px-4 py-2 text-xs font-bold text-slate-100 hover:border-amber-500/50 hover:bg-white/10 disabled:opacity-30 transition-all active:scale-95"
           >
-            Next Song
-            <SkipForward className="h-4 w-4" />
+            <span className="hidden sm:inline">Next Song</span>
+            <span className="sm:hidden">Next</span>
+            <SkipForward className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>

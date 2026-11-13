@@ -9,6 +9,8 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+    Columns,
+  CopyCheck,
   Crosshair,
   Download,
   Eye,
@@ -18,6 +20,8 @@ import {
   FolderDown,
   Hand,
   HelpCircle,
+  Info,
+  ListMusic,
   Loader2,
   Lock,
   Magnet,
@@ -28,10 +32,10 @@ import {
   PlayCircle,
   Plus,
   RotateCcw,
+  Rows,
   Save,
   Sparkles,
   Trash2,
-  Tv,
   Unlock,
   Upload,
   X,
@@ -160,7 +164,6 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
   const isPresenting = usePresenterStore((s) => s.isPresenting);
   const isBlank = usePresenterStore((s) => s.isBlank);
   const exportBundle = usePresenterStore((s) => s.exportBundle);
-  const createDemoSong = usePresenterStore((s) => s.createDemoSong);
   const importProject = usePresenterStore((s) => s.importProject);
 
   // Persisted UI preferences from useUIStore
@@ -172,6 +175,17 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
   const togglePreviewEnabled = useUIStore((s) => s.togglePreviewEnabled);
   const waveformZoom = useUIStore((s) => s.waveformZoom);
   const setWaveformZoom = useUIStore((s) => s.setWaveformZoom);
+  const manualSyncVisible = useUIStore((s) => s.manualSyncVisible);
+  const setManualSyncVisible = useUIStore((s) => s.setManualSyncVisible);
+  const toggleManualSyncVisible = useUIStore((s) => s.toggleManualSyncVisible);
+  const lyricsTimelineVisible = useUIStore((s) => s.lyricsTimelineVisible);
+  const setLyricsTimelineVisible = useUIStore((s) => s.setLyricsTimelineVisible);
+  const toggleLyricsTimelineVisible = useUIStore((s) => s.toggleLyricsTimelineVisible);
+  const syncLayoutMode = useUIStore((s) => s.syncLayoutMode);
+  const toggleSyncLayoutMode = useUIStore((s) => s.toggleSyncLayoutMode);
+  const manualSyncWidth = useUIStore((s) => s.manualSyncWidth);
+  const setManualSyncWidth = useUIStore((s) => s.setManualSyncWidth);
+  const setApplyAllModalOpen = useUIStore((s) => s.setApplyAllModalOpen);
 
   const isPresentingRef = useRef(isPresenting);
   isPresentingRef.current = isPresenting;
@@ -205,6 +219,9 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
   const [isAligning, setIsAligning] = useState(false);
   const [showRawModal, setShowRawModal] = useState(false);
   const [showAutoMenu, setShowAutoMenu] = useState(false);
+  const autoMenuRef = useRef<HTMLDivElement | null>(null);
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const exportMenuRef = useRef<HTMLDivElement | null>(null);
   const [rawDraft, setRawDraft] = useState('');
   const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
 
@@ -215,17 +232,32 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
   const draftLinesRef = useRef<SyncedLine[]>(draftLines);
   draftLinesRef.current = draftLines;
 
-  // Locked/Unlocked Mode: Default to Locked so scrubbing/clicking can never corrupt timestamps
-  const [isEditingUnlocked, setIsEditingUnlocked] = useState(false);
+  // Locked/Unlocked Mode: Default to Unlocked so waveform dragging is immediately responsive
+  const [isEditingUnlocked, setIsEditingUnlocked] = useState(true);
   const isEditingUnlockedRef = useRef(isEditingUnlocked);
   isEditingUnlockedRef.current = isEditingUnlocked;
 
-  // Manual Lyrics Sync Flow: Hold-to-Sing (Natural) vs Single Tap (Rhythmic)
-  const [tapMode, setTapMode] = useState(false);
-  const [syncMethod, setSyncMethod] = useState<'hold' | 'tap'>('hold');
+  // Manual Lyrics Sync Flow: Hold-to-Sing (Natural) vs Single Tap (Rhythmic) - Enabled by default below waveforms!
+  const [tapMode, setTapMode] = useState(true);
+  const syncMethod: 'hold' = 'hold';
   const [tapIndex, setTapIndex] = useState(0);
   const [isHolding, setIsHolding] = useState(false);
   const [prevClosedByMusic, setPrevClosedByMusic] = useState(false);
+  const [showTimelineInfo, setShowTimelineInfo] = useState(false);
+
+  useEffect(() => {
+    if (!showExportMenu && !showAutoMenu) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (showExportMenu && exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+      if (showAutoMenu && autoMenuRef.current && !autoMenuRef.current.contains(e.target as Node)) {
+        setShowAutoMenu(false);
+      }
+    };
+    window.addEventListener('mousedown', handleClickOutside);
+    return () => window.removeEventListener('mousedown', handleClickOutside);
+  }, [showExportMenu, showAutoMenu]);
 
   // Focus & hover tracking: distinguishes Timeline Zoom vs Whole UI Zoom
   const [isTimelineFocused, setIsTimelineFocused] = useState(false);
@@ -287,10 +319,10 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
       setDraftLines(fresh);
       draftLinesRef.current = fresh;
       liveLinesRef.current = fresh;
-      setIsEditingUnlocked(false);
-      isEditingUnlockedRef.current = false;
+      setIsEditingUnlocked(true);
+      isEditingUnlockedRef.current = true;
       setRawDraft(activeSong.rawLyrics);
-      setTapMode(false);
+      setTapMode(true);
       setTapIndex(0);
       setIsHolding(false);
       setPrevClosedByMusic(false);
@@ -539,6 +571,22 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
     const onMouseMove = (moveEvent: MouseEvent) => {
       const delta = startX - moveEvent.clientX;
       setRightPanelWidth(startW + delta);
+    };
+    const onMouseUp = () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+  };
+
+  const handleManualSyncResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = manualSyncWidth;
+    const onMouseMove = (moveEvent: MouseEvent) => {
+      const delta = moveEvent.clientX - startX;
+      setManualSyncWidth(startW + delta);
     };
     const onMouseUp = () => {
       window.removeEventListener('mousemove', onMouseMove);
@@ -1113,6 +1161,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
     setIsEditingUnlocked(true);
     isEditingUnlockedRef.current = true;
     setTapMode(true);
+    setManualSyncVisible(true);
     setStudioTab('sync');
 
     if (wsRef.current && clamped > 0) {
@@ -1167,27 +1216,25 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
       const song = activeSongRef.current;
       if (!ws || !song) return;
 
-      // Tap-to-Sync Mode Hotkeys
-      if (tapMode) {
+      // Tap-to-Sync Mode Hotkeys (Active when Manual Sync deck is open)
+      if (manualSyncVisible && tapMode) {
         if (e.repeat) return;
 
-        if (syncMethod === 'hold') {
-          if (e.code === 'Space' || e.code === 'ArrowDown') {
-            e.preventDefault();
-            handleHoldStart();
-            return;
+        if (e.code === 'Space' || e.code === 'ArrowDown') {
+          e.preventDefault();
+          handleHoldStart();
+          return;
+        }
+        if (e.code === 'Enter' || e.code === 'KeyM') {
+          e.preventDefault();
+          handleHoldEnd();
+          const lines = draftLinesRef.current;
+          if (tapIndexRef.current < lines.length - 1) {
+            setTapIndex(tapIndexRef.current + 1);
+            tapIndexRef.current = tapIndexRef.current + 1;
+            setSelectedLineId(lines[tapIndexRef.current]?.id ?? null);
           }
-        } else {
-          if (e.code === 'Space' || e.code === 'ArrowDown') {
-            e.preventDefault();
-            handleTapStampNext();
-            return;
-          }
-          if (e.code === 'ArrowRight' || e.code === 'KeyM') {
-            e.preventDefault();
-            handleTapEndToMusic();
-            return;
-          }
+          return;
         }
 
         if (e.code === 'ArrowLeft' || e.code === 'KeyU') {
@@ -1200,7 +1247,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
           e.preventDefault();
           setIsHolding(false);
           isHoldingRef.current = false;
-          setTapMode(false);
+          setManualSyncVisible(false);
         }
         return;
       }
@@ -1284,7 +1331,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
     };
 
     const onKeyUp = (e: KeyboardEvent) => {
-      if (tapMode && syncMethod === 'hold') {
+      if (manualSyncVisible && tapMode && syncMethod === 'hold') {
         if (e.code === 'Space' || e.code === 'ArrowDown') {
           e.preventDefault();
           handleHoldEnd();
@@ -1300,6 +1347,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
     };
   }, [
     studioTab,
+    manualSyncVisible,
     tapMode,
     syncMethod,
     selectedLineId,
@@ -1337,7 +1385,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
           </div>
 
           {/* Quickstart Action Cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left max-w-xl mx-auto">
             {/* Card 1: Add New Song */}
             <div
               onClick={() => onNewSong?.()}
@@ -1360,29 +1408,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
               </div>
             </div>
 
-            {/* Card 2: Load Demo Track */}
-            <div
-              onClick={createDemoSong}
-              className="group relative flex flex-col justify-between rounded-2xl border border-stage-border bg-stage-panel/80 p-5 hover:border-emerald-500/60 hover:bg-stage-panel hover:shadow-xl hover:shadow-emerald-500/5 transition-all cursor-pointer"
-            >
-              <div className="space-y-2">
-                <div className="h-10 w-10 rounded-xl bg-emerald-500/15 border border-emerald-500/40 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
-                  <Sparkles className="h-5 w-5" />
-                </div>
-                <h3 className="text-sm font-bold text-white group-hover:text-emerald-300 transition-colors">
-                  Load Demo Bhajan
-                </h3>
-                <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Explore pre-synced vocals, interactive waveform timeline, and stage looks.
-                </p>
-              </div>
-              <div className="mt-4 pt-3 border-t border-white/5 flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
-                <span>Load Demo</span>
-                <ChevronRight className="h-3.5 w-3.5 group-hover:translate-x-0.5 transition-transform" />
-              </div>
-            </div>
-
-            {/* Card 3: Restore Project Backup */}
+            {/* Card 2: Restore Project Backup */}
             <div
               onClick={importProject}
               className="group relative flex flex-col justify-between rounded-2xl border border-stage-border bg-stage-panel/80 p-5 hover:border-sky-500/60 hover:bg-stage-panel hover:shadow-xl hover:shadow-sky-500/5 transition-all cursor-pointer"
@@ -1699,10 +1725,6 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
 
   const selectedIndex = draftLines.findIndex((l) => l.id === selectedLineId);
   const selectedLine = selectedIndex >= 0 ? draftLines[selectedIndex] : null;
-  const nextAfterSelected =
-    selectedIndex >= 0 && selectedIndex < draftLines.length - 1
-      ? draftLines[selectedIndex + 1]
-      : null;
 
   const updateLineTiming = (lineId: string, start: number, end: number) => {
     const safeStart = Math.max(0, Number(start.toFixed(3)));
@@ -1722,6 +1744,728 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
       ? draftLines[liveStageState.activeLineIndex] ?? null
       : null;
 
+  const renderManualSyncDeck = (isSideBySide: boolean) => {
+    // --- SIDE-BY-SIDE COLUMN LAYOUT ---
+    if (isSideBySide) {
+      return (
+        <div
+          style={{
+            width: lyricsTimelineVisible ? `${manualSyncWidth}px` : '100%',
+            minWidth: lyricsTimelineVisible ? '280px' : 'auto',
+            maxWidth: lyricsTimelineVisible ? '800px' : 'none',
+          }}
+          className={`flex flex-col min-h-0 shrink-0 border-r border-stage-border bg-[#0d1017] overflow-hidden ${
+            !lyricsTimelineVisible ? 'flex-1' : ''
+          }`}
+        >
+          {/* Header Bar */}
+          <div className="flex items-center justify-between border-b border-stage-border px-3 py-2 bg-[#090b10] shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 px-2 py-0.5 text-[11px] font-bold text-amber-300">
+                <Zap className="h-3 w-3 text-amber-400" />
+                {tapMode ? 'LIVE SYNC' : 'MANUAL SYNC'}
+              </span>
+              {tapMode && (
+                <span className="font-mono text-xs font-bold text-amber-400">
+                  #{Math.min(tapIndex + 1, draftLines.length)} / {draftLines.length}
+                </span>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1">
+              {tapMode && (
+                <button
+                  type="button"
+                  disabled={tapHistoryRef.current.length === 0}
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    handleTapUndo(true);
+                  }}
+                  title="Undo last stamp & rewind 1.5s (← / U)"
+                  className="flex items-center gap-1 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-30 transition-colors"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Undo
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  setIsHolding(false);
+                  isHoldingRef.current = false;
+                  setTapMode(!tapMode);
+                }}
+                title={tapMode ? 'Switch to timestamp fine-tune inspector' : 'Switch to live sync mode'}
+                className="rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-[11px] font-medium text-slate-300 hover:text-white transition-colors"
+              >
+                {tapMode ? 'Inspector' : 'Live Sync'}
+              </button>
+
+              {/* Layout Switcher (Columns -> Rows) */}
+              <button
+                type="button"
+                onClick={toggleSyncLayoutMode}
+                title="Move panel to Stacked (Top / Bottom)"
+                className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <Rows className="h-3.5 w-3.5 text-sky-400" />
+              </button>
+
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsHolding(false);
+                  isHoldingRef.current = false;
+                  setManualSyncVisible(false);
+                }}
+                title="Hide Live Sync Panel"
+                className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Sub-header Transport Bar (Speed & Seek) */}
+          <div className="flex items-center justify-between border-b border-stage-border/60 px-3 py-1.5 bg-black/40 shrink-0 text-[11px]">
+            <div className="flex items-center gap-1">
+              <span className="text-slate-500 text-[10px] uppercase font-bold mr-1">Speed:</span>
+              {([0.75, 1, 1.25] as const).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    setPlaybackRate(r);
+                  }}
+                  className={`rounded px-1.5 py-0.5 font-medium transition-colors ${
+                    playbackRate === r ? 'bg-amber-500/25 text-amber-300 font-bold' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {r}x
+                </button>
+              ))}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  wsRef.current?.skip(-2);
+                }}
+                className="rounded border border-stage-border/80 bg-stage-card px-1.5 py-0.5 text-slate-300 hover:text-white"
+              >
+                -2s
+              </button>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  wsRef.current?.skip(2);
+                }}
+                className="rounded border border-stage-border/80 bg-stage-card px-1.5 py-0.5 text-slate-300 hover:text-white"
+              >
+                +2s
+              </button>
+            </div>
+          </div>
+
+          {/* Panel Main Content Area (Compact, NO scroll needed) */}
+          <div className="flex-1 flex flex-col justify-between p-3 gap-2.5 overflow-hidden">
+            {tapMode ? (
+              <>
+                {/* Hold to Sing Interactive Card */}
+                <div
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleHoldStart();
+                  }}
+                  onMouseUp={(e) => {
+                    e.preventDefault();
+                    handleHoldEnd();
+                  }}
+                  onMouseLeave={() => {
+                    if (isHoldingRef.current) handleHoldEnd();
+                  }}
+                  className={`w-full flex-1 min-h-[110px] cursor-pointer select-none rounded-2xl border-2 p-3 transition-all duration-150 flex flex-col items-center justify-center text-center shadow-lg ${
+                    isHolding
+                      ? 'border-amber-400 bg-amber-500/25 scale-[1.005] shadow-[0_0_24px_rgba(245,185,66,0.3)]'
+                      : 'border-amber-500/50 bg-black/60 hover:border-amber-400 hover:bg-black/80'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wider">
+                    {isHolding ? (
+                      <span className="flex items-center gap-1.5 text-amber-300 animate-pulse">
+                        <Hand className="h-3.5 w-3.5" />
+                        SINGING ACTIVE — RELEASE FOR MUSIC GAP
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 text-slate-300">
+                        <Hand className="h-3.5 w-3.5 text-amber-400" />
+                        HOLD SPACEBAR / CLICK TO SING
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="mt-2 text-base font-bold text-white max-w-full px-2 line-clamp-2">
+                    {draftLines[tapIndex]?.text ?? 'All lines complete!'}
+                  </div>
+
+                  <div className="mt-2 text-xs text-slate-400 truncate max-w-full">
+                    Up Next: <span className="text-slate-300 font-medium">{draftLines[tapIndex + 1]?.text ?? '— End of Song —'}</span>
+                  </div>
+                </div>
+
+                {/* Footer Controls: Backtrack, Advance, Save */}
+                <div className="flex items-center justify-between gap-2 shrink-0 pt-1">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={tapIndex <= 0}
+                      onClick={() => {
+                        const prev = Math.max(0, tapIndex - 1);
+                        setTapIndex(prev);
+                        tapIndexRef.current = prev;
+                        setSelectedLineId(draftLines[prev]?.id ?? null);
+                      }}
+                      title="Backtrack to previous line"
+                      className="rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-xs text-slate-300 hover:text-white disabled:opacity-30"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={tapIndex >= draftLines.length - 1}
+                      onClick={() => {
+                        const next = Math.min(draftLines.length - 1, tapIndex + 1);
+                        setTapIndex(next);
+                        tapIndexRef.current = next;
+                        setSelectedLineId(draftLines[next]?.id ?? null);
+                      }}
+                      title="Advance to next line"
+                      className="rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-xs text-slate-300 hover:text-white disabled:opacity-30"
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+
+                  {isDirty && (
+                    <button
+                      type="button"
+                      onClick={handleSaveVerifiedSync}
+                      className="flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 shadow transition-colors"
+                    >
+                      <Check className="h-3.5 w-3.5 stroke-[3]" />
+                      Save Verified Sync
+                    </button>
+                  )}
+                </div>
+              </>
+            ) : (
+              /* Fine-Tune Timestamp Inspector */
+              <div className="flex-1 flex flex-col justify-between gap-2 overflow-hidden">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={handleToggleUnlock}
+                      className={`flex-1 flex items-center justify-center gap-1.5 rounded-xl border px-2 py-1 text-xs font-semibold transition-all ${
+                        isEditingUnlocked
+                          ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,185,66,0.2)]'
+                          : 'border-stage-border bg-stage-card text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      {isEditingUnlocked ? (
+                        <>
+                          <Unlock className="h-3.5 w-3.5 text-amber-400" />
+                          <span>Unlocked</span>
+                        </>
+                      ) : (
+                        <>
+                          <Lock className="h-3.5 w-3.5 text-slate-400" />
+                          <span>Locked</span>
+                        </>
+                      )}
+                    </button>
+
+                    {isDirty && (
+                      <button
+                        type="button"
+                        onClick={handleSaveVerifiedSync}
+                        className="flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1 text-xs font-bold text-black hover:bg-emerald-400 shadow"
+                      >
+                        <Check className="h-3.5 w-3.5 stroke-[3]" />
+                        Save
+                      </button>
+                    )}
+                  </div>
+
+                  {selectedLine ? (
+                    <div className="rounded-xl border border-stage-border bg-black/40 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="rounded bg-sky-500/20 border border-sky-500/40 px-1.5 py-0.5 font-mono text-[11px] font-bold text-sky-300">
+                          Line #{selectedIndex + 1}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!wsRef.current) return;
+                            const lead = Math.max(0, selectedLine.startTime - 1);
+                            wsRef.current.setTime(lead);
+                            wsRef.current.play().catch(() => {});
+                          }}
+                          className="rounded border border-stage-border bg-stage-card px-2 py-0.5 text-[10px] text-slate-300 hover:text-white"
+                        >
+                          -1s Cue Check
+                        </button>
+                      </div>
+
+                      <div className="text-xs font-semibold text-white truncate">
+                        {selectedLine.text}
+                      </div>
+
+                      {/* Start Nudge */}
+                      <div className="flex items-center justify-between gap-1 text-[11px]">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase w-10">Start</span>
+                        <button
+                          type="button"
+                          disabled={!isEditingUnlocked}
+                          onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime - 0.1, selectedLine.endTime)}
+                          className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                        >
+                          -100
+                        </button>
+                        <SyncedTimeInput
+                          value={selectedLine.startTime}
+                          min={0}
+                          disabled={!isEditingUnlocked}
+                          className="w-16 rounded border border-stage-border bg-stage-panel px-1 py-0.5 text-center font-mono text-[11px] text-amber-300 focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                          onCommit={(val) => updateLineTiming(selectedLine.id, val, Math.max(val + 0.1, selectedLine.endTime))}
+                        />
+                        <button
+                          type="button"
+                          disabled={!isEditingUnlocked}
+                          onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime + 0.1, selectedLine.endTime)}
+                          className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                        >
+                          +100
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!isEditingUnlocked}
+                          title="Set Start = Playhead ([)"
+                          onClick={() => {
+                            const t = wsRef.current?.getCurrentTime() ?? 0;
+                            updateLineTiming(selectedLine.id, t, Math.max(t + 0.15, selectedLine.endTime));
+                          }}
+                          className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/30 disabled:opacity-30"
+                        >
+                          @Now [
+                        </button>
+                      </div>
+
+                      {/* End Nudge */}
+                      <div className="flex items-center justify-between gap-1 text-[11px]">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase w-10">End</span>
+                        <button
+                          type="button"
+                          disabled={!isEditingUnlocked}
+                          onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime, selectedLine.endTime - 0.1)}
+                          className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                        >
+                          -100
+                        </button>
+                        <SyncedTimeInput
+                          value={selectedLine.endTime}
+                          min={selectedLine.startTime + 0.1}
+                          disabled={!isEditingUnlocked}
+                          className="w-16 rounded border border-stage-border bg-stage-panel px-1 py-0.5 text-center font-mono text-[11px] text-sky-300 focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                          onCommit={(val) => updateLineTiming(selectedLine.id, selectedLine.startTime, val)}
+                        />
+                        <button
+                          type="button"
+                          disabled={!isEditingUnlocked}
+                          onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime, selectedLine.endTime + 0.1)}
+                          className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                        >
+                          +100
+                        </button>
+                        <button
+                          type="button"
+                          disabled={!isEditingUnlocked}
+                          title="Set End = Playhead (])"
+                          onClick={() => {
+                            const t = wsRef.current?.getCurrentTime() ?? 0;
+                            updateLineTiming(selectedLine.id, selectedLine.startTime, t);
+                          }}
+                          className="rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-300 hover:bg-sky-500/30 disabled:opacity-30"
+                        >
+                          @Now ]
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-stage-border p-3 text-center text-xs text-slate-400">
+                      Select any lyric line to inspect and adjust timestamps.
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.currentTarget.blur();
+                    startTapFromIndex(selectedIndex > 0 ? selectedIndex : 0);
+                  }}
+                  className="w-full flex items-center justify-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-black shadow-lg hover:bg-amber-400 transition-transform active:scale-95"
+                >
+                  <Zap className="h-3.5 w-3.5" />
+                  {selectedIndex > 0 ? `Start Live Sync (#${selectedIndex + 1})` : 'Start Live Sync Studio'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // --- STACKED HORIZONTAL BANNER LAYOUT ---
+    return (
+      tapMode ? (
+        <div className="border-b border-amber-500/40 bg-gradient-to-r from-[#1a1308] via-[#12151f] to-[#0f131c] px-4 py-2 space-y-2 shrink-0">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="rounded-lg bg-amber-500 px-2 py-0.5 text-[11px] font-extrabold text-black tracking-wide">
+                LIVE SYNC
+              </span>
+              <span className="text-xs font-semibold text-slate-200">
+                Cue <span className="text-amber-300 font-mono font-bold">#{Math.min(tapIndex + 1, draftLines.length)} / {draftLines.length}</span>
+              </span>
+
+              {/* Speed Pills */}
+              <div className="flex items-center rounded-lg border border-stage-border bg-black/40 p-0.5 text-[11px] ml-2">
+                {([0.75, 1, 1.25] as const).map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={(e) => {
+                      e.currentTarget.blur();
+                      setPlaybackRate(r);
+                    }}
+                    className={`rounded px-1.5 py-0.5 font-medium ${
+                      playbackRate === r ? 'bg-amber-500/25 text-amber-300 font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {r}x
+                  </button>
+                ))}
+              </div>
+
+              {/* Seek Buttons */}
+              <button
+                type="button"
+                onClick={() => wsRef.current?.skip(-2)}
+                className="rounded border border-stage-border bg-stage-card px-2 py-0.5 text-xs text-slate-200 hover:border-amber-500/50"
+              >
+                -2s
+              </button>
+              <button
+                type="button"
+                onClick={() => wsRef.current?.skip(2)}
+                className="rounded border border-stage-border bg-stage-card px-2 py-0.5 text-xs text-slate-200 hover:border-amber-500/50"
+              >
+                +2s
+              </button>
+
+              <button
+                type="button"
+                disabled={tapHistoryRef.current.length === 0}
+                onClick={() => handleTapUndo(true)}
+                title="Undo last stamp & rewind (← / U)"
+                className="flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-30"
+              >
+                <RotateCcw className="h-3 w-3" />
+                Undo
+              </button>
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsHolding(false);
+                  isHoldingRef.current = false;
+                  setTapMode(false);
+                }}
+                className="rounded-xl border border-amber-500/40 bg-amber-500/15 px-2.5 py-1 text-xs font-semibold text-amber-200 hover:bg-amber-500/25"
+              >
+                Inspector
+              </button>
+
+              {/* Layout Switcher (Rows -> Columns) */}
+              <button
+                type="button"
+                onClick={toggleSyncLayoutMode}
+                title="Move panel to Side-by-Side (Columns)"
+                className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1 text-xs font-semibold text-slate-300 hover:text-white hover:border-amber-500/50 transition-colors"
+              >
+                <Columns className="h-3.5 w-3.5 text-amber-400" />
+                Side-by-Side
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setIsHolding(false);
+                  isHoldingRef.current = false;
+                  setManualSyncVisible(false);
+                }}
+                title="Hide Live Sync Panel"
+                className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Hold to Sing Card */}
+          <div
+            onMouseDown={(e) => {
+              e.preventDefault();
+              handleHoldStart();
+            }}
+            onMouseUp={(e) => {
+              e.preventDefault();
+              handleHoldEnd();
+            }}
+            onMouseLeave={() => {
+              if (isHoldingRef.current) handleHoldEnd();
+            }}
+            className={`w-full cursor-pointer select-none rounded-2xl border-2 px-4 py-2.5 transition-all duration-150 flex flex-col items-center justify-center text-center shadow-lg ${
+              isHolding
+                ? 'border-amber-400 bg-amber-500/25 scale-[1.005] shadow-[0_0_24px_rgba(245,185,66,0.25)]'
+                : 'border-stage-border bg-black/60 hover:border-amber-500/60 hover:bg-black/70'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider">
+              {isHolding ? (
+                <span className="flex items-center gap-2 text-amber-300 animate-pulse">
+                  <Hand className="h-3.5 w-3.5" />
+                  SINGING ACTIVE — RELEASE SPACEBAR WHEN LINE ENDS
+                </span>
+              ) : (
+                <span className="flex items-center gap-2 text-slate-300">
+                  <Hand className="h-3.5 w-3.5 text-amber-400" />
+                  HOLD SPACEBAR (OR CLICK) WHILE VOCALS SING
+                </span>
+              )}
+            </div>
+
+            <div className="mt-1 text-base font-bold tracking-tight text-white max-w-2xl truncate">
+              {draftLines[tapIndex]?.text ?? 'All lines complete!'}
+            </div>
+
+            <div className="mt-1 text-xs text-slate-400">
+              Up Next: <strong className="text-slate-300">{draftLines[tapIndex + 1]?.text ?? '— End of Song —'}</strong>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* Stacked Inspector Mode */
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stage-border bg-[#0e1118] px-4 py-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleToggleUnlock}
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-semibold transition-all ${
+                isEditingUnlocked
+                  ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,185,66,0.2)]'
+                  : 'border-stage-border bg-stage-card text-slate-300 hover:text-white'
+              }`}
+            >
+              {isEditingUnlocked ? (
+                <>
+                  <Unlock className="h-3 w-3 text-amber-400" />
+                  <span>Unlocked</span>
+                </>
+              ) : (
+                <>
+                  <Lock className="h-3 w-3 text-slate-400" />
+                  <span>Locked</span>
+                </>
+              )}
+            </button>
+
+            {isDirty && (
+              <>
+                <button
+                  type="button"
+                  onClick={handleAuditionChanges}
+                  className="flex items-center gap-1 rounded-xl border border-sky-500/40 bg-sky-500/10 px-2 py-1 text-xs font-semibold text-sky-300 hover:bg-sky-500/20"
+                >
+                  <PlayCircle className="h-3 w-3" />
+                  Audition
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDiscardChanges}
+                  className="flex items-center gap-1 rounded-xl border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  Discard
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveVerifiedSync}
+                  className="flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1 text-xs font-bold text-black hover:bg-emerald-400 shadow"
+                >
+                  <Check className="h-3 w-3 stroke-[3]" />
+                  Save Verified Sync
+                </button>
+              </>
+            )}
+          </div>
+
+          {selectedLine ? (
+            <div className="flex items-center gap-3 flex-1 min-w-0 justify-end">
+              <span className="rounded bg-sky-500/15 border border-sky-500/40 px-2 py-0.5 font-mono text-xs font-bold text-sky-300">
+                Line #{selectedIndex + 1}
+              </span>
+
+              {/* Start Nudge */}
+              <div className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-bg px-2 py-0.5 text-xs">
+                <span className="text-[10px] text-slate-400 font-semibold mr-1">Start</span>
+                <button
+                  type="button"
+                  disabled={!isEditingUnlocked}
+                  onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime - 0.1, selectedLine.endTime)}
+                  className="rounded px-1 text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                >
+                  -100
+                </button>
+                <SyncedTimeInput
+                  value={selectedLine.startTime}
+                  min={0}
+                  disabled={!isEditingUnlocked}
+                  className="w-14 rounded border border-stage-border bg-stage-panel px-1 py-0.5 text-center font-mono text-xs text-amber-300 focus:outline-none"
+                  onCommit={(val) => updateLineTiming(selectedLine.id, val, Math.max(val + 0.1, selectedLine.endTime))}
+                />
+                <button
+                  type="button"
+                  disabled={!isEditingUnlocked}
+                  onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime + 0.1, selectedLine.endTime)}
+                  className="rounded px-1 text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                >
+                  +100
+                </button>
+                <button
+                  type="button"
+                  disabled={!isEditingUnlocked}
+                  title="Set Start = Playhead ([)"
+                  onClick={() => {
+                    const t = wsRef.current?.getCurrentTime() ?? 0;
+                    updateLineTiming(selectedLine.id, t, Math.max(t + 0.15, selectedLine.endTime));
+                  }}
+                  className="rounded bg-amber-500/20 px-1 text-[10px] font-bold text-amber-300 hover:bg-amber-500/30 disabled:opacity-30"
+                >
+                  @Now [
+                </button>
+              </div>
+
+              {/* End Nudge */}
+              <div className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-bg px-2 py-0.5 text-xs">
+                <span className="text-[10px] text-slate-400 font-semibold mr-1">End</span>
+                <button
+                  type="button"
+                  disabled={!isEditingUnlocked}
+                  onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime, selectedLine.endTime - 0.1)}
+                  className="rounded px-1 text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                >
+                  -100
+                </button>
+                <SyncedTimeInput
+                  value={selectedLine.endTime}
+                  min={selectedLine.startTime + 0.1}
+                  disabled={!isEditingUnlocked}
+                  className="w-14 rounded border border-stage-border bg-stage-panel px-1 py-0.5 text-center font-mono text-xs text-sky-300 focus:outline-none"
+                  onCommit={(val) => updateLineTiming(selectedLine.id, selectedLine.startTime, val)}
+                />
+                <button
+                  type="button"
+                  disabled={!isEditingUnlocked}
+                  onClick={() => updateLineTiming(selectedLine.id, selectedLine.startTime, selectedLine.endTime + 0.1)}
+                  className="rounded px-1 text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-30"
+                >
+                  +100
+                </button>
+                <button
+                  type="button"
+                  disabled={!isEditingUnlocked}
+                  title="Set End = Playhead (])"
+                  onClick={() => {
+                    const t = wsRef.current?.getCurrentTime() ?? 0;
+                    updateLineTiming(selectedLine.id, selectedLine.startTime, t);
+                  }}
+                  className="rounded bg-sky-500/20 px-1 text-[10px] font-bold text-sky-300 hover:bg-sky-500/30 disabled:opacity-30"
+                >
+                  @Now ]
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (!wsRef.current) return;
+                  const lead = Math.max(0, selectedLine.startTime - 1);
+                  wsRef.current.setTime(lead);
+                  wsRef.current.play().catch(() => {});
+                }}
+                className="rounded-xl border border-stage-border bg-stage-card px-2 py-1 text-xs text-slate-300 hover:text-white"
+              >
+                -1s Cue Check
+              </button>
+            </div>
+          ) : (
+            <span className="text-xs text-slate-400">
+              Select any lyric line to inspect timestamps.
+            </span>
+          )}
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => startTapFromIndex(selectedIndex > 0 ? selectedIndex : 0)}
+              className="flex items-center gap-1.5 rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-bold text-black shadow hover:bg-amber-400"
+            >
+              <Zap className="h-3 w-3" />
+              Start Live Sync
+            </button>
+            <button
+              type="button"
+              onClick={toggleSyncLayoutMode}
+              title="Move panel to Side-by-Side (Columns)"
+              className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white"
+            >
+              <Columns className="h-3.5 w-3.5 text-amber-400" />
+              Side-by-Side
+            </button>
+            <button
+              type="button"
+              onClick={() => setManualSyncVisible(false)}
+              className="rounded-lg p-1 text-slate-400 hover:bg-white/10 hover:text-white"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        </div>
+      )
+    );
+  };
+
   return (
     <div className="flex flex-1 min-h-0 flex-col overflow-hidden bg-stage-bg relative">
       {/* Floating Zoom Notice HUD */}
@@ -1733,106 +2477,243 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
       )}
 
       {/* Song Preparation Header Bar: Sync vs Per-Song Stage Config */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stage-border bg-[#0b0d13] px-5 py-2.5">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="min-w-0">
-            <div className="truncate text-sm font-bold text-white">{activeSong.title}</div>
-            <div className="text-[11px] text-slate-400">
+      <div className="flex flex-nowrap items-center justify-between gap-3 border-b border-stage-border bg-[#0b0d13] px-4 py-2 min-w-0 shrink-0 relative z-30 overflow-visible">
+        <div className="flex items-center gap-2.5 min-w-0 shrink">
+          <div className="min-w-0 max-w-[120px] sm:max-w-[160px] md:max-w-[200px] shrink">
+            <div className="truncate text-sm font-bold text-white" title={activeSong.title}>
+              {activeSong.title}
+            </div>
+            <div className="truncate text-[11px] text-slate-400">
               {draftLines.length} lines • Offset{' '}
               {Math.round((activeSong.globalOffsetSeconds ?? 0) * 1000)}ms
             </div>
           </div>
 
-          <div className="h-6 w-px bg-stage-border mx-1" />
+          <div className="h-5 w-px bg-stage-border mx-0.5 shrink-0" />
 
-          <div className="flex items-center rounded-xl border border-stage-border bg-stage-bg p-0.5">
+          {/* Mode Switcher Tabs */}
+          <div className="flex items-center rounded-xl border border-stage-border bg-stage-bg p-0.5 shrink-0">
             <button
               type="button"
               onClick={() => setStudioTab('sync')}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+              title="Lyrics & Manual Sync"
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all duration-200 ${
                 studioTab === 'sync'
                   ? 'bg-stage-card text-amber-300 shadow'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Activity className="h-3.5 w-3.5" />
-              Lyrics & Manual Sync
+              <Activity className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline">Lyrics & Sync</span>
             </button>
             <button
               type="button"
               onClick={() => setStudioTab('config')}
-              className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${
+              title="Stage Look & Visual Package"
+              className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-semibold transition-all duration-200 ${
                 studioTab === 'config'
                   ? 'bg-stage-card text-amber-300 shadow'
                   : 'text-slate-400 hover:text-white'
               }`}
             >
-              <Palette className="h-3.5 w-3.5" />
-              Stage Look & Song Config
+              <Palette className="h-3.5 w-3.5 shrink-0" />
+              <span className="hidden sm:inline">Stage Look</span>
             </button>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Unsaved draft indicator & direct sync action buttons */}
-          {isDirty && (
-            <div className="flex items-center gap-1.5 mr-1">
-              <span className="flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2 py-1 text-[11px] font-bold text-amber-300 animate-pulse">
-                ● Unsaved Edits
-              </span>
-              <button
-                type="button"
-                onClick={handleDiscardChanges}
-                title="Discard uncommitted edits and revert to saved"
-                className="flex items-center gap-1 rounded-xl border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Discard
-              </button>
+        <div className="flex items-center gap-2 shrink-0">
+          {studioTab === 'sync' ? (
+            <>
+              {/* If uncommitted lyric sync edits exist */}
+              {isDirty && (
+                <div className="flex items-center gap-1.5">
+                  <span className="flex items-center gap-1 rounded-lg border border-amber-500/40 bg-amber-500/15 px-2 py-1 text-[11px] font-bold text-amber-300 animate-pulse shrink-0">
+                    ● <span className="hidden md:inline">Unsaved</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleDiscardChanges}
+                    title="Discard uncommitted edits and revert to saved"
+                    className="flex items-center gap-1 rounded-xl border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20 active:scale-95 transition-all shrink-0"
+                  >
+                    <RotateCcw className="h-3.5 w-3.5" />
+                    <span className="hidden sm:inline">Discard</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Save Verified Sync Button */}
               <button
                 type="button"
                 onClick={handleSaveVerifiedSync}
                 title="Save verified sync timestamps to song package"
-                className="flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 shadow-md"
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-bold transition-all shadow-sm shrink-0 active:scale-95 ${
+                  isDirty
+                    ? 'bg-emerald-500 text-black hover:bg-emerald-400 shadow-md'
+                    : 'border border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+                }`}
               >
-                <Check className="h-3.5 w-3.5 stroke-[3]" />
-                Save Verified Sync
+                <Check className="h-3.5 w-3.5 stroke-[3] text-current" />
+                <span className="hidden sm:inline">Save Verified Sync</span>
+                <span className="sm:hidden">Save Sync</span>
               </button>
-            </div>
-          )}
 
-          <button
-            type="button"
-            onClick={async () => {
-              if (isDirty) {
-                await updateSyncedLines(draftLines);
-              }
-              await flushSaveActiveSong(true);
-            }}
-            className="flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
-          >
-            <Save className="h-3.5 w-3.5" />
-            Save Song Config
-          </button>
-          <button
-            type="button"
-            onClick={async () => {
-              if (isDirty) {
-                await updateSyncedLines(draftLines);
-              }
-              await flushSaveActiveSong(false);
-              setMode('stage');
-            }}
-            className="flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-1.5 text-xs font-bold text-black hover:bg-amber-400"
-          >
-            <Tv className="h-3.5 w-3.5" />
-            Stage Console →
-          </button>
+              {/* Export Song Menu (After Save button in Lyrics & Sync) */}
+              <div className="relative" ref={exportMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setShowExportMenu((v) => !v)}
+                  title="Export song in various formats (.zip, .lrc, .srt, .vtt, .json)"
+                  className="flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 active:scale-95 transition-all shadow-sm shrink-0"
+                >
+                  <Download className="h-3.5 w-3.5 text-sky-400" />
+                  <span className="hidden sm:inline">Export Song</span>
+                  <span className="sm:hidden">Export</span>
+                  <ChevronDown className="h-3 w-3 opacity-70" />
+                </button>
+
+                {showExportMenu && (
+                  <div
+                    className="absolute right-0 top-full mt-1.5 z-50 w-72 rounded-2xl border border-stage-border bg-[#0e1118]/95 p-1.5 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 space-y-0.5"
+                  >
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Export Formats
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        handleExportSongBundle();
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs font-semibold text-amber-200 hover:bg-amber-500/15 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Download className="h-3.5 w-3.5 text-amber-400" />
+                        <span>Song Package (.zip)</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">Audio + Sync</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        handleExportLrc();
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs font-semibold text-emerald-200 hover:bg-emerald-500/15 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Download className="h-3.5 w-3.5 text-emerald-400" />
+                        <span>Standard LRC (.lrc)</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">Players</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        handleExportSrt();
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-white/5 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Download className="h-3.5 w-3.5 text-sky-400" />
+                        <span>SubRip Subtitles (.srt)</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">Premiere / DaVinci</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        handleExportVtt();
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-white/5 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Download className="h-3.5 w-3.5 text-sky-400" />
+                        <span>WebVTT Captions (.vtt)</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">Web / Video</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        handleExportJson();
+                      }}
+                      className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-300 hover:bg-white/5 transition-colors"
+                    >
+                      <span className="flex items-center gap-2">
+                        <FileText className="h-3.5 w-3.5 text-purple-400" />
+                        <span>Synced JSON (.json)</span>
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">Data</span>
+                    </button>
+
+                    <div className="my-1 border-t border-stage-border/60" />
+
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Import & Replace
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowExportMenu(false);
+                        handleImportLrc();
+                      }}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5 transition-colors"
+                    >
+                      <Upload className="h-3.5 w-3.5 text-slate-400" />
+                      <span>Import .LRC Timecode File</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              {/* Stage Look Tab: Save Song Config Button */}
+              <button
+                type="button"
+                onClick={async () => {
+                  if (isDirty) {
+                    await updateSyncedLines(draftLines);
+                  }
+                  await flushSaveActiveSong(true);
+                }}
+                title="Save changes to this song package"
+                className="flex items-center gap-1.5 rounded-xl border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20 active:scale-95 transition-all shadow-sm shrink-0"
+              >
+                <Save className="h-3.5 w-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">Save Song Config</span>
+                <span className="sm:hidden">Save</span>
+              </button>
+
+              {/* Stage Look Tab: Apply to All Songs Button */}
+              <button
+                type="button"
+                onClick={() => setApplyAllModalOpen(true)}
+                title={`Apply this Stage Look to all ${songs.length} songs`}
+                className="flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/20 active:scale-95 transition-all shadow-sm shrink-0"
+              >
+                <CopyCheck className="h-3.5 w-3.5 text-sky-400" />
+                <span className="hidden sm:inline">Apply to All Songs</span>
+                <span className="sm:hidden">Apply All</span>
+              </button>
+            </>
+          )}
         </div>
       </div>
 
       {studioTab === 'config' && (
-        <SongConfigPanel song={activeSong} onGoToStage={() => setMode('stage')} />
+        <SongConfigPanel key={activeSong.id} song={activeSong} onGoToStage={() => setMode('stage')} />
       )}
 
       {/* Keep Waveform Sync DOM mounted (hidden when editing visual config) so WaveSurfer never reloads */}
@@ -1947,6 +2828,62 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
           </div>
 
           <div className="flex items-center gap-2 relative">
+            {/* Lyric Timeline Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleLyricsTimelineVisible}
+              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all ${
+                lyricsTimelineVisible
+                  ? 'border-stage-border bg-stage-card text-slate-200 hover:border-amber-500/50'
+                  : 'border-dashed border-stage-border/70 bg-transparent text-slate-500 hover:text-slate-300'
+              }`}
+              title={lyricsTimelineVisible ? 'Hide Lyrics Timeline' : 'Show Lyrics Timeline'}
+            >
+              <ListMusic className={`h-3.5 w-3.5 ${lyricsTimelineVisible ? 'text-amber-400' : 'text-slate-500'}`} />
+              <span>{lyricsTimelineVisible ? 'Lyrics' : 'Lyrics: Hidden'}</span>
+            </button>
+
+            {/* Dedicated Manual Sync Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleManualSyncVisible}
+              className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all ${
+                manualSyncVisible
+                  ? 'border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,185,66,0.2)]'
+                  : 'border-stage-border bg-stage-card text-slate-300 hover:text-white'
+              }`}
+              title={
+                manualSyncVisible
+                  ? 'Hide Manual Sync Command Deck (Frees vertical space for Lyrics)'
+                  : 'Show Manual Sync Command Deck (Tap-to-Sync & Fine-Tune)'
+              }
+            >
+              <Zap className={`h-3.5 w-3.5 ${manualSyncVisible ? 'text-amber-400 fill-amber-400' : 'text-slate-400'}`} />
+              <span>{manualSyncVisible ? 'Manual Sync: Active' : 'Manual Sync'}</span>
+            </button>
+
+            {/* Panel Arrangement Switcher (Side-by-Side vs Stacked) */}
+            {manualSyncVisible && lyricsTimelineVisible && (
+              <button
+                type="button"
+                onClick={toggleSyncLayoutMode}
+                className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white hover:border-amber-500/50 transition-colors"
+                title={`Switch workspace layout to ${syncLayoutMode === 'side-by-side' ? 'Stacked (Top / Bottom)' : 'Side-by-Side (Columns)'}`}
+              >
+                {syncLayoutMode === 'side-by-side' ? (
+                  <>
+                    <Columns className="h-3.5 w-3.5 text-amber-400" />
+                    <span>Side-by-Side</span>
+                  </>
+                ) : (
+                  <>
+                    <Rows className="h-3.5 w-3.5 text-sky-400" />
+                    <span>Stacked</span>
+                  </>
+                )}
+              </button>
+            )}
+
             {/* Explicit Live Preview Toggle */}
             <button
               type="button"
@@ -1972,7 +2909,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
               Raw Lyrics Studio
             </button>
 
-            <div className="relative">
+            <div className="relative" ref={autoMenuRef}>
               <button
                 type="button"
                 disabled={isAligning}
@@ -1980,13 +2917,12 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
                 className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3 py-1.5 text-xs font-semibold text-slate-200 hover:border-amber-500/50 disabled:opacity-40"
               >
                 <Sparkles className="h-3.5 w-3.5 text-amber-400" />
-                {isAligning ? 'Aligning...' : 'Auto-Sync & Export'}
+                <span>{isAligning ? 'Aligning...' : 'Auto-Sync'}</span>
                 <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
               </button>
 
               {showAutoMenu && (
                 <div
-                  onMouseLeave={() => setShowAutoMenu(false)}
                   className="absolute right-0 mt-2 w-72 rounded-2xl border border-stage-border bg-stage-panel p-2 shadow-2xl z-30 space-y-1"
                 >
                   <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
@@ -2036,92 +2972,6 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
                       <div className="font-medium">Offline Vocal-Onset DP</div>
                       <div className="text-[10px] text-slate-500">Heuristic Energy Envelope</div>
                     </div>
-                  </button>
-
-                  <div className="my-1 border-t border-stage-border" />
-                  <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Import & External App Export
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
-                      handleImportLrc();
-                    }}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    <Upload className="h-3.5 w-3.5 text-slate-400" />
-                    Import .LRC Timecode File
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
-                      handleExportSrt();
-                    }}
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <Download className="h-3.5 w-3.5 text-amber-400" />
-                      Export SubRip Subtitles (.srt)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">Premiere / DaVinci</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
-                      handleExportVtt();
-                    }}
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <Download className="h-3.5 w-3.5 text-sky-400" />
-                      Export WebVTT (.vtt)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">Web / Video</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
-                      handleExportLrc();
-                    }}
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <Download className="h-3.5 w-3.5 text-emerald-400" />
-                      Export Standard LRC (.lrc)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">Spotify / Players</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
-                      handleExportJson();
-                    }}
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <FileText className="h-3.5 w-3.5 text-purple-400" />
-                      Export Synced JSON (.json)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">Data</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
-                      handleExportSongBundle();
-                    }}
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-1.5 text-left text-xs text-slate-200 hover:bg-white/5"
-                  >
-                    <span className="flex items-center gap-2.5">
-                      <Download className="h-3.5 w-3.5 text-amber-500" />
-                      Export Song Package (.zip)
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">Audio + Sync</span>
                   </button>
                 </div>
               )}
@@ -2198,846 +3048,418 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
           <div className="w-12 h-0.5 rounded-full bg-slate-500 group-hover:bg-black transition-colors" />
         </div>
 
-        {/* Dedicated Manual Sync Command Deck: Tap Mode OR Focused Selected-Line Inspector */}
-        {tapMode ? (
-          <div className="border-b border-amber-500/40 bg-gradient-to-r from-[#1a1308] via-[#12151f] to-[#0f131c] px-5 py-3 space-y-3 shrink-0">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <span className="rounded-lg bg-amber-500 px-2.5 py-1 text-[11px] font-extrabold text-black tracking-wide">
-                  LIVE SYNC MODE
-                </span>
-
-                {/* Sync Method Switcher: Hold to Sing vs Single Tap */}
-                <div className="flex items-center rounded-xl border border-stage-border bg-black/60 p-0.5 text-xs">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSyncMethod('hold');
-                      setIsHolding(false);
-                    }}
-                    title="Press & hold key while vocals are singing; release for instrumental breaks"
-                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1 font-semibold transition-colors ${
-                      syncMethod === 'hold'
-                        ? 'bg-amber-500 text-black shadow'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Hand className="h-3.5 w-3.5" />
-                    Hold-to-Sing (Natural)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSyncMethod('tap');
-                      setIsHolding(false);
-                    }}
-                    title="Single tap per line using Space/Down Arrow and Right Arrow for music"
-                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1 font-semibold transition-colors ${
-                      syncMethod === 'tap'
-                        ? 'bg-amber-500 text-black shadow'
-                        : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Zap className="h-3.5 w-3.5" />
-                    Single Tap (Rhythmic)
-                  </button>
-                </div>
-
-                <span className="text-xs font-semibold text-slate-200">
-                  Cue{' '}
-                  <span className="text-amber-300 font-mono">
-                    {Math.min(tapIndex + 1, draftLines.length)} / {draftLines.length}
-                  </span>
-                </span>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center rounded-lg border border-stage-border bg-black/40 p-0.5 text-[11px] mr-1">
-                  {([0.75, 1, 1.25] as const).map((r) => (
-                    <button
-                      key={r}
-                      type="button"
-                      onClick={(e) => {
-                        e.currentTarget.blur();
-                        setPlaybackRate(r);
-                      }}
-                      className={`rounded px-2 py-0.5 font-medium ${
-                        playbackRate === r
-                          ? 'bg-amber-500/25 text-amber-300'
-                          : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      {r}x
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    wsRef.current?.skip(-2);
-                  }}
-                  className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1.5 text-xs text-slate-200 hover:border-amber-500/50"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  -2s
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    wsRef.current?.skip(2);
-                  }}
-                  className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1.5 text-xs text-slate-200 hover:border-amber-500/50"
-                >
-                  +2s
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-
-                <button
-                  type="button"
-                  disabled={tapHistoryRef.current.length === 0}
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    handleTapUndo(true);
-                  }}
-                  title="Undo last stamp and rewind 1.5s to re-catch the beat (← or U)"
-                  className="flex items-center gap-1 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-200 hover:bg-amber-500/20 disabled:opacity-35"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Undo & Rewind (← / U)
-                </button>
-
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.currentTarget.blur();
-                    setIsHolding(false);
-                    isHoldingRef.current = false;
-                    setTapMode(false);
-                  }}
-                  className="rounded-xl border border-rose-500/40 bg-rose-500/15 px-3 py-1.5 text-xs font-semibold text-rose-200 hover:bg-rose-500/25"
-                >
-                  Done (Esc)
-                </button>
-              </div>
-            </div>
-
-            {/* Interactive Live Control Bar tailored to the active sync method */}
-            {syncMethod === 'hold' ? (
-              <div className="space-y-2">
-                <div
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    handleHoldStart();
-                  }}
-                  onMouseUp={(e) => {
-                    e.preventDefault();
-                    handleHoldEnd();
-                  }}
-                  onMouseLeave={() => {
-                    if (isHoldingRef.current) handleHoldEnd();
-                  }}
-                  className={`w-full cursor-pointer select-none rounded-2xl border-2 px-6 py-4 transition-all duration-150 flex flex-col items-center justify-center text-center shadow-xl ${
-                    isHolding
-                      ? 'border-amber-400 bg-gradient-to-r from-amber-500/30 via-amber-400/20 to-amber-500/30 scale-[1.008] shadow-[0_0_36px_rgba(245,185,66,0.25)]'
-                      : 'border-stage-border bg-black/50 hover:border-amber-500/60 hover:bg-black/70'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider">
-                    {isHolding ? (
-                      <span className="flex items-center gap-2 text-amber-300 animate-pulse">
-                        <Hand className="h-4 w-4" />
-                        SINGING ACTIVE — RELEASE SPACEBAR (OR MOUSE) WHEN LINE ENDS
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-2 text-slate-300">
-                        <Hand className="h-4 w-4 text-amber-400" />
-                        HOLD SPACEBAR (OR DOWN ARROW ↓) WHILE VOCALS SING
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mt-2 text-xl font-bold tracking-tight text-white max-w-3xl truncate">
-                    {draftLines[tapIndex]?.text ?? 'All lines complete!'}
-                  </div>
-
-                  <div className="mt-2 flex items-center gap-4 text-xs font-medium text-slate-400">
-                    <span>
-                      Up Next:{' '}
-                      <strong className="text-slate-300">
-                        {draftLines[tapIndex + 1]?.text ?? '— End of Song —'}
-                      </strong>
-                    </span>
-                    <span>•</span>
-                    <span className="text-sky-300">
-                      Instrumental gaps between verses are created automatically when key is released!
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-3 items-stretch">
-                <div
-                  className={`rounded-2xl border px-4 py-3 flex flex-col justify-between ${
-                    prevClosedByMusic
-                      ? 'border-sky-400/60 bg-sky-500/10'
-                      : 'border-stage-border/80 bg-black/40'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider">
-                    <span className={prevClosedByMusic ? 'text-sky-300' : 'text-slate-400'}>
-                      {prevClosedByMusic
-                        ? '♪ Music Interlude Active'
-                        : tapIndex > 0
-                          ? 'Now Singing'
-                          : '♪ Intro Music'}
-                    </span>
-                    {tapIndex > 0 && !prevClosedByMusic && draftLines[tapIndex - 1] && (
-                      <span className="font-mono text-emerald-300">
-                        +{Math.max(0, wsTime - draftLines[tapIndex - 1].startTime).toFixed(1)}s
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 truncate text-sm font-medium text-slate-200">
-                    {prevClosedByMusic
-                      ? 'Waiting for next vocal entrance...'
-                      : tapIndex > 0
-                        ? draftLines[tapIndex - 1]?.text
-                        : 'Press Space or Down Arrow when Line 1 starts'}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border-2 border-amber-400/75 bg-amber-500/15 px-4 py-3 flex flex-col justify-between gap-2.5 shadow-lg">
-                  <div>
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-amber-300">
-                      Next Lyric To Stamp
-                    </div>
-                    <div className="mt-0.5 truncate text-base font-bold text-white">
-                      {draftLines[tapIndex]?.text ?? 'Press Space to close final line'}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.currentTarget.blur();
-                        handleTapStampNext();
-                      }}
-                      className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-amber-500 px-3 py-2 text-xs font-extrabold text-black hover:bg-amber-400 active:scale-95"
-                    >
-                      <Zap className="h-3.5 w-3.5" />
-                      Stamp Next (Space / ↓)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={tapIndex <= 0}
-                      onClick={(e) => {
-                        e.currentTarget.blur();
-                        handleTapEndToMusic();
-                      }}
-                      title="Close current singing line for instrumental solo (Right Arrow → or M)"
-                      className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-bold transition-colors disabled:opacity-35 ${
-                        prevClosedByMusic
-                          ? 'border-sky-400 bg-sky-500 text-black'
-                          : 'border-sky-400/60 bg-sky-500/20 text-sky-200 hover:bg-sky-500/30'
-                      }`}
-                    >
-                      <Music2 className="h-3.5 w-3.5" />
-                      Music Break (→)
-                    </button>
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-stage-border/80 bg-black/40 px-4 py-3 flex flex-col justify-between">
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    Coming Up Next
-                  </div>
-                  <div className="mt-1 truncate text-sm text-slate-300">
-                    {draftLines[tapIndex + 1]?.text ?? '— End of Song —'}
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-stage-border bg-[#0e1118] px-5 py-2.5 shrink-0">
-            {/* Lock / Unlock Toggle & Verification Controls */}
-            <div className="flex flex-wrap items-center gap-2.5">
-              <button
-                type="button"
-                onClick={handleToggleUnlock}
-                className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all ${
-                  isEditingUnlocked
-                    ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,185,66,0.2)]'
-                    : 'border-stage-border bg-stage-card text-slate-300 hover:text-white'
-                }`}
-                title={
-                  isEditingUnlocked
-                    ? 'Editing is UNLOCKED: Waveform regions can be dragged and resized.'
-                    : 'Editing is LOCKED: Scrub and audition freely without shifting timestamps.'
-                }
-              >
-                {isEditingUnlocked ? (
-                  <>
-                    <Unlock className="h-3.5 w-3.5 text-amber-400" />
-                    <span>Unlocked to Edit</span>
-                  </>
-                ) : (
-                  <>
-                    <Lock className="h-3.5 w-3.5 text-slate-400" />
-                    <span>Locked (Scrub Safe)</span>
-                  </>
-                )}
-              </button>
-
-              {isDirty && (
-                <>
-                  <button
-                    type="button"
-                    onClick={handleAuditionChanges}
-                    className="flex items-center gap-1.5 rounded-xl border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-semibold text-sky-300 hover:bg-sky-500/20"
-                    title="Audition edited lines with audio playback"
-                  >
-                    <PlayCircle className="h-3.5 w-3.5" />
-                    Verify / Audition
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDiscardChanges}
-                    className="flex items-center gap-1.5 rounded-xl border border-rose-500/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-300 hover:bg-rose-500/20"
-                    title="Discard changes and revert to saved timestamps"
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    Discard
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleSaveVerifiedSync}
-                    className="flex items-center gap-1.5 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-bold text-black hover:bg-emerald-400 shadow-md"
-                    title="Commit verified timestamps to song package"
-                  >
-                    <Check className="h-3.5 w-3.5 stroke-[3]" />
-                    Save Verified Sync
-                  </button>
-                </>
-              )}
-            </div>
-
-            {selectedLine ? (
-              <div className="flex flex-wrap items-center gap-3 flex-1 min-w-0 justify-end">
-                <span className="rounded-lg bg-sky-500/15 border border-sky-500/40 px-2 py-1 font-mono text-xs font-bold text-sky-300">
-                  Line #{selectedIndex + 1}
-                </span>
-
-                {/* Selected Start Fine-Tune */}
-                <div className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-bg px-2 py-1">
-                  <span className="text-[11px] font-semibold text-slate-400 mr-1">Start</span>
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() =>
-                      updateLineTiming(
-                        selectedLine.id,
-                        selectedLine.startTime - 0.1,
-                        selectedLine.endTime,
-                      )
-                    }
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-35"
-                  >
-                    -100
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() =>
-                      updateLineTiming(
-                        selectedLine.id,
-                        selectedLine.startTime - 0.025,
-                        selectedLine.endTime,
-                      )
-                    }
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-35"
-                  >
-                    -25
-                  </button>
-                  <SyncedTimeInput
-                    value={selectedLine.startTime}
-                    min={0}
-                    disabled={!isEditingUnlocked}
-                    className="w-16 rounded border border-stage-border bg-stage-panel px-1.5 py-0.5 text-center font-mono text-xs text-amber-300 focus:border-amber-500 focus:outline-none disabled:opacity-50"
-                    onCommit={(val) =>
-                      updateLineTiming(selectedLine.id, val, Math.max(val + 0.1, selectedLine.endTime))
-                    }
-                  />
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() =>
-                      updateLineTiming(
-                        selectedLine.id,
-                        selectedLine.startTime + 0.025,
-                        selectedLine.endTime,
-                      )
-                    }
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-35"
-                  >
-                    +25
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() =>
-                      updateLineTiming(
-                        selectedLine.id,
-                        selectedLine.startTime + 0.1,
-                        selectedLine.endTime,
-                      )
-                    }
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-35"
-                  >
-                    +100
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    title="Set Start = Playhead ([)"
-                    onClick={() => {
-                      const t = wsRef.current?.getCurrentTime() ?? 0;
-                      updateLineTiming(selectedLine.id, t, Math.max(t + 0.15, selectedLine.endTime));
-                    }}
-                    className="ml-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 hover:bg-amber-500/30 disabled:opacity-35"
-                  >
-                    @Now [
-                  </button>
-                </div>
-
-                {/* Selected End Fine-Tune */}
-                <div className="flex items-center gap-1 rounded-xl border border-stage-border bg-stage-bg px-2 py-1">
-                  <span className="text-[11px] font-semibold text-slate-400 mr-1">End</span>
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() =>
-                      updateLineTiming(
-                        selectedLine.id,
-                        selectedLine.startTime,
-                        selectedLine.endTime - 0.1,
-                      )
-                    }
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-35"
-                  >
-                    -100
-                  </button>
-                  <SyncedTimeInput
-                    value={selectedLine.endTime}
-                    min={selectedLine.startTime + 0.1}
-                    disabled={!isEditingUnlocked}
-                    className="w-16 rounded border border-stage-border bg-stage-panel px-1.5 py-0.5 text-center font-mono text-xs text-sky-300 focus:border-amber-500 focus:outline-none disabled:opacity-50"
-                    onCommit={(val) =>
-                      updateLineTiming(selectedLine.id, selectedLine.startTime, val)
-                    }
-                  />
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() =>
-                      updateLineTiming(
-                        selectedLine.id,
-                        selectedLine.startTime,
-                        selectedLine.endTime + 0.1,
-                      )
-                    }
-                    className="rounded px-1.5 py-0.5 font-mono text-[10px] text-slate-300 hover:bg-white/10 disabled:opacity-35"
-                  >
-                    +100
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    title="Set End = Playhead (])"
-                    onClick={() => {
-                      const t = wsRef.current?.getCurrentTime() ?? 0;
-                      updateLineTiming(selectedLine.id, selectedLine.startTime, t);
-                    }}
-                    className="ml-1 rounded bg-sky-500/20 px-1.5 py-0.5 text-[10px] font-bold text-sky-300 hover:bg-sky-500/30 disabled:opacity-35"
-                  >
-                    @Now ]
-                  </button>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (!wsRef.current) return;
-                    const lead = Math.max(0, selectedLine.startTime - 1);
-                    wsRef.current.setTime(lead);
-                    wsRef.current.play().catch(() => {});
-                  }}
-                  title="Play from 1 second before this line starts"
-                  className="rounded-xl border border-stage-border bg-stage-card px-2.5 py-1.5 text-xs font-medium text-slate-200 hover:border-amber-500/50"
-                >
-                  -1s Cue Check
-                </button>
-
-                {nextAfterSelected && nextAfterSelected.startTime - selectedLine.endTime < 1.8 && (
-                  <button
-                    type="button"
-                    disabled={!isEditingUnlocked}
-                    onClick={() => {
-                      const targetEnd = Math.min(
-                        selectedLine.endTime,
-                        nextAfterSelected.startTime - 2.0,
-                      );
-                      if (targetEnd >= selectedLine.startTime + 0.4) {
-                        updateLineTiming(selectedLine.id, selectedLine.startTime, targetEnd);
-                      } else {
-                        const safeEnd = Math.max(
-                          selectedLine.startTime + 0.8,
-                          selectedLine.endTime - 2.0,
-                        );
-                        const pushBy = Math.max(0, safeEnd + 2.0 - nextAfterSelected.startTime);
-                        const next = draftLines.map((l, i) => {
-                          if (l.id === selectedLine.id) return { ...l, endTime: Number(safeEnd.toFixed(3)) };
-                          if (i > selectedIndex && pushBy > 0) {
-                            return {
-                              ...l,
-                              startTime: Number((l.startTime + pushBy).toFixed(3)),
-                              endTime: Number((l.endTime + pushBy).toFixed(3)),
-                            };
-                          }
-                          return l;
-                        });
-                        applyDraftLinesAndRefreshRegions(next);
-                      }
-                      showToast('Created 2.0s instrumental Music Animation gap.', 'success');
-                    }}
-                    className="flex items-center gap-1 rounded-xl border border-sky-500/40 bg-sky-500/10 px-2.5 py-1.5 text-xs font-medium text-sky-300 hover:bg-sky-500/20 disabled:opacity-35"
-                  >
-                    <Music2 className="h-3.5 w-3.5" />
-                    + Music Gap (2s)
-                  </button>
-                )}
-              </div>
-            ) : (
-              <span className="text-xs text-slate-400">
-                Select any lyric line below to audition or inspect timestamps.
-              </span>
-            )}
-
-            <button
-              type="button"
-              onClick={(e) => {
-                e.currentTarget.blur();
-                startTapFromIndex(selectedIndex > 0 ? selectedIndex : 0);
-              }}
-              className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2 text-xs font-bold text-black shadow-lg hover:bg-amber-400 shrink-0"
-            >
-              <Zap className="h-3.5 w-3.5" />
-              {selectedIndex > 0
-                ? `Start Live Sync from #${selectedIndex + 1}`
-                : 'Start Live Sync Studio'}
-            </button>
-          </div>
-        )}
+        {/* Dedicated Manual Sync Command Deck (Stacked Mode: Horizontal Banner below Waveform) */}
+        {manualSyncVisible && syncLayoutMode === 'stacked' && renderManualSyncDeck(false)}
 
         {/* Main Workspace Split: Clean Scannable Lyric Sheet + Optional Live 16:9 Preview */}
         <div className="flex flex-1 min-h-0 overflow-hidden">
-          <div className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-stage-border px-5 py-2 bg-stage-panel/50">
-              <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Lyric Timeline ({draftLines.length} lines)
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleAddMusicBreakAtPlayhead}
-                  className="flex items-center gap-1.5 rounded-lg border border-sky-500/40 bg-sky-500/10 px-2.5 py-1 text-xs font-semibold text-sky-200 hover:bg-sky-500/20 transition-colors"
-                  title="Insert an instrumental music interlude at current playhead"
+          {/* Side-by-Side Column: Manual Sync Deck */}
+          {manualSyncVisible && syncLayoutMode === 'side-by-side' && (
+            <>
+              {renderManualSyncDeck(true)}
+              {lyricsTimelineVisible && (
+                <div
+                  onMouseDown={handleManualSyncResizeStart}
+                  className="group relative w-1.5 shrink-0 cursor-col-resize bg-stage-border/60 hover:bg-amber-400 transition-colors flex items-center justify-center select-none z-10"
+                  title="Drag to resize Manual Sync panel width"
                 >
-                  <Music2 className="h-3.5 w-3.5 text-sky-300" />
-                  + Music Break
-                </button>
-                <button
-                  type="button"
-                  onClick={handleAddLineAtPlayhead}
-                  className="flex items-center gap-1.5 rounded-lg border border-stage-border bg-stage-card px-2.5 py-1 text-xs text-slate-200 hover:border-amber-500/50"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  Add Line at Playhead
-                </button>
-              </div>
-            </div>
+                  <div className="h-8 w-0.5 rounded-full bg-slate-500 group-hover:bg-black transition-colors" />
+                </div>
+              )}
+            </>
+          )}
 
-            <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-stage-border/40 slim-scrollbar">
-              {(() => {
-                const liveIdx = liveStageState.activeLineIndex;
-                const firstLineStart = draftLines[0]?.startTime ?? 0;
-                return (
-                  <>
-                    {firstLineStart >= 0.8 && (
-                      <div className="flex items-center justify-between bg-sky-500/[0.06] px-5 py-1.5 text-xs text-sky-300">
-                        <span className="flex items-center gap-2">
-                          <Music2 className="h-3.5 w-3.5 shrink-0" />
-                          <span>
-                            Intro Music Animation ({formatTimeMs(0)} → {formatTimeMs(firstLineStart)} •{' '}
-                            {firstLineStart.toFixed(1)}s)
-                          </span>
-                        </span>
-                      </div>
+          {/* Lyric Timeline Main Column */}
+          {lyricsTimelineVisible ? (
+            <div className="flex-1 min-h-0 flex flex-col overflow-hidden bg-stage-bg border-r border-stage-border">
+              {/* Header Bar */}
+              <div className="flex items-center justify-between border-b border-stage-border px-3.5 py-2 bg-[#090b10] shrink-0 relative">
+                <div className="flex items-center gap-2">
+                  <ListMusic className="h-4 w-4 text-amber-400" />
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                    Lyric Timeline
+                  </span>
+                  <span className="rounded bg-black/40 border border-stage-border px-1.5 py-0.5 font-mono text-[10px] text-slate-400">
+                    {draftLines.length} lines
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5 relative">
+                  {/* (i) Controls & Shortcuts Menu Toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowTimelineInfo((v) => !v)}
+                    title="Timeline Actions & Keyboard Shortcuts"
+                    className={`rounded-lg p-1.5 text-xs font-semibold transition-colors flex items-center gap-1 ${
+                      showTimelineInfo
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                        : 'text-slate-400 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    <Info className="h-4 w-4 text-amber-400" />
+                  </button>
+
+                  {/* Layout Move Button: Side-by-Side vs Stacked */}
+                  <button
+                    type="button"
+                    onClick={toggleSyncLayoutMode}
+                    title={`Move panel to ${syncLayoutMode === 'side-by-side' ? 'Stacked (Top / Bottom)' : 'Side-by-Side (Columns)'}`}
+                    className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    {syncLayoutMode === 'side-by-side' ? (
+                      <Rows className="h-4 w-4 text-sky-400" />
+                    ) : (
+                      <Columns className="h-4 w-4 text-amber-400" />
                     )}
+                  </button>
 
-                    {draftLines.map((line, idx) => {
-                      const isSelected = line.id === selectedLineId;
-                      const isTapTarget = tapMode && idx === tapIndex;
-                      const isLivePlayhead =
-                        idx === liveIdx && !liveStageState.isMusicInterlude;
-                      const isModified = isLineModified(line.id);
-                      const durSec = Math.max(0.01, line.endTime - line.startTime);
-                      const nextLine = draftLines[idx + 1];
-                      const gapAfter = nextLine ? nextLine.startTime - line.endTime : 0;
-                      const progressPct = isLivePlayhead
-                        ? Math.max(0, Math.min(100, ((wsTime - line.startTime) / durSec) * 100))
-                        : 0;
+                  {/* Close / Hide Button */}
+                  <button
+                    type="button"
+                    onClick={() => setLyricsTimelineVisible(false)}
+                    title="Hide Lyric Timeline"
+                    className="rounded-lg p-1.5 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
 
-                      return (
-                        <React.Fragment key={line.id}>
-                          <div
-                            ref={(el) => {
-                              if (el) rowRefs.current.set(line.id, el);
-                              else rowRefs.current.delete(line.id);
-                            }}
-                            onClick={() => setSelectedLineId(line.id)}
-                            className={`group relative flex items-center gap-3 px-5 py-2.5 transition-colors cursor-pointer ${
-                              isTapTarget
-                                ? 'bg-amber-500/20 border-l-4 border-l-amber-400'
-                                : isLivePlayhead
-                                  ? 'bg-emerald-500/10 border-l-4 border-l-emerald-400'
-                                  : isSelected
-                                    ? 'bg-white/[0.06] border-l-4 border-l-sky-400'
-                                    : 'hover:bg-white/[0.03]'
-                            }`}
+                  {/* (i) Centered Dialog Overlay (Never cut off or clipped by viewport) */}
+                  {showTimelineInfo && (
+                    <div
+                      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-100"
+                      onClick={() => setShowTimelineInfo(false)}
+                    >
+                      <div
+                        className="w-full max-w-sm rounded-2xl border border-stage-border bg-[#0d1017] p-4 shadow-2xl space-y-3.5 animate-in zoom-in-95 duration-100 max-h-[85vh] overflow-y-auto"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between border-b border-stage-border/60 pb-2.5">
+                          <span className="text-sm font-bold text-amber-300 flex items-center gap-2">
+                            <Info className="h-4 w-4 text-amber-400" />
+                            Timeline Actions & Shortcuts
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowTimelineInfo(false)}
+                            className="rounded-lg p-1 text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
                           >
-                            {isLivePlayhead && (
-                              <div
-                                className="pointer-events-none absolute bottom-0 left-0 h-0.5 bg-emerald-400 transition-all duration-75"
-                                style={{ width: `${progressPct}%` }}
-                              />
-                            )}
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
 
-                            <span className="w-7 text-right font-mono text-xs font-semibold text-slate-500 shrink-0">
-                              {idx + 1}
-                            </span>
-
-                            {isModified && (
-                              <span className="rounded bg-amber-500/20 border border-amber-500/40 px-1.5 py-0.5 text-[10px] font-bold text-amber-300 shrink-0">
-                                Unsaved Edit
-                              </span>
-                            )}
-
-                            {/* Clean Time Range Badge */}
+                        {/* Quick Insert Actions */}
+                        <div className="space-y-1.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Insert Actions
+                          </span>
+                          <div className="grid grid-cols-1 gap-1.5">
                             <button
                               type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedLineId(line.id);
-                                wsRef.current?.setTime(line.startTime);
+                              onClick={() => {
+                                setShowTimelineInfo(false);
+                                handleAddMusicBreakAtPlayhead();
                               }}
-                              title="Click to jump playhead to start time"
-                              className="shrink-0 flex items-center gap-1.5 rounded-lg border border-stage-border bg-stage-bg px-2.5 py-1 font-mono text-[11px] hover:border-amber-500/50"
+                              className="flex items-center gap-2 rounded-xl border border-sky-500/40 bg-sky-500/10 px-3 py-2 text-xs font-semibold text-sky-200 hover:bg-sky-500/20 transition-colors text-left"
                             >
-                              <span className="text-amber-300">{formatTimeMs(line.startTime)}</span>
-                              <span className="text-slate-600">→</span>
-                              <span className="text-sky-300">{formatTimeMs(line.endTime)}</span>
-                              <span className="ml-1 rounded bg-white/5 px-1 text-[10px] text-slate-400">
-                                {durSec.toFixed(1)}s
-                              </span>
+                              <Music2 className="h-3.5 w-3.5 text-sky-300 shrink-0" />
+                              <span>+ Music Break at Playhead</span>
                             </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowTimelineInfo(false);
+                                handleAddLineAtPlayhead();
+                              }}
+                              className="flex items-center gap-2 rounded-xl border border-stage-border bg-stage-card px-3 py-2 text-xs font-medium text-slate-200 hover:border-amber-500/50 transition-colors text-left"
+                            >
+                              <Plus className="h-3.5 w-3.5 shrink-0" />
+                              <span>+ Add Line at Playhead</span>
+                            </button>
+                          </div>
+                        </div>
 
-                            {line.confidence !== undefined && (
-                              <span
-                                title={
-                                  line.confidence >= 0.5
-                                    ? `High-confidence Whisper speech match (${Math.round(line.confidence * 100)}%)`
-                                    : `Interpolated timing between anchors (${Math.round(line.confidence * 100)}%)`
-                                }
-                                className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold shrink-0 border ${
-                                  line.confidence >= 0.5
-                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                                }`}
-                              >
-                                {line.confidence >= 0.5 ? 'Anchor' : 'Interpolated'}
-                              </span>
-                            )}
-
-                            {/* Editable Lyric Text */}
-                            {(() => {
-                              const isMusicTag = /^\[.*(music|instrumental|interlude|♪).*\]$/i.test(line.text.trim());
-                              return (
-                                <div className="flex-1 min-w-[160px] flex items-center gap-2">
-                                  {isMusicTag && (
-                                    <Music2 className="h-4 w-4 text-sky-300 shrink-0" />
-                                  )}
-                                  <input
-                                    type="text"
-                                    value={line.text}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onFocus={() => setSelectedLineId(line.id)}
-                                    onChange={(e) => {
-                                      const next = draftLines.map((l) =>
-                                        l.id === line.id ? { ...l, text: e.target.value } : l,
-                                      );
-                                      applyDraftLinesAndRefreshRegions(next);
-                                    }}
-                                    className={`flex-1 rounded-lg border bg-transparent px-2.5 py-1 text-sm focus:border-amber-500 focus:bg-stage-bg focus:outline-none ${
-                                      isMusicTag
-                                        ? 'border-sky-500/40 bg-sky-500/10 text-sky-200 font-semibold'
-                                        : 'border-transparent text-slate-100'
-                                    } ${isLivePlayhead ? 'font-semibold text-white ring-1 ring-amber-400/50' : ''}`}
-                                  />
-                                </div>
-                              );
-                            })()}
-
-                            {/* Row Action Buttons */}
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  (e.currentTarget as HTMLButtonElement).blur();
-                                  startTapFromIndex(idx);
-                                }}
-                                title="Start Live Sync from this line"
-                                className="flex items-center gap-1 rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-[11px] font-medium text-slate-300 hover:border-amber-500/50 hover:text-amber-300"
-                              >
-                                <Crosshair className="h-3 w-3" />
-                                Sync
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handlePlayLine(line.id);
-                                }}
-                                title="Audition strictly this line (P)"
-                                className="flex items-center gap-1 rounded-lg border border-stage-border bg-stage-card px-2.5 py-1 text-xs font-medium text-amber-300 hover:bg-amber-500/20"
-                              >
-                                <Play className="h-3 w-3" />
-                                Play
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const start = line.endTime;
-                                  const nextLine = draftLines[idx + 1];
-                                  const end = nextLine ? Math.max(start + 1.0, nextLine.startTime) : start + 4.0;
-                                  const newMusicLine: SyncedLine = {
-                                    id: `music-${Date.now().toString(36)}`,
-                                    index: idx + 1,
-                                    startTime: Number(start.toFixed(2)),
-                                    endTime: Number(end.toFixed(2)),
-                                    text: '[♪ Instrumental Music]',
-                                    confidence: 1.0,
-                                  };
-                                  const updated = [...draftLines];
-                                  updated.splice(idx + 1, 0, newMusicLine);
-                                  applyDraftLinesAndRefreshRegions(updated);
-                                  setIsEditingUnlocked(true);
-                                  isEditingUnlockedRef.current = true;
-                                  showToast('Inserted instrumental Music Animation break.', 'success');
-                                }}
-                                title="Insert [♪ Instrumental Music] break after this line"
-                                className="flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-300 hover:bg-sky-500/20"
-                              >
-                                <Music2 className="h-3 w-3" />
-                                + Music
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  const next = draftLines.filter((l) => l.id !== line.id);
-                                  applyDraftLinesAndRefreshRegions(next);
-                                }}
-                                title="Remove line"
-                                className="rounded-lg p-1.5 text-slate-500 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 hover:text-rose-400 transition-opacity"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                        {/* Keyboard Shortcuts List */}
+                        <div className="space-y-1.5 border-t border-stage-border/60 pt-2.5">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                            Keyboard Shortcuts
+                          </span>
+                          <div className="space-y-1 text-xs">
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">Space</span>
+                              <span className="text-slate-300 text-[11px]">Hold = Sing, Release = Music</span>
+                            </div>
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">Enter / M</span>
+                              <span className="text-slate-300 text-[11px]">Commit Line & Advance</span>
+                            </div>
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">← / U</span>
+                              <span className="text-slate-300 text-[11px]">Undo Last Stamp & Rewind</span>
+                            </div>
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">[ / ]</span>
+                              <span className="text-slate-300 text-[11px]">Set Start / End at Playhead</span>
+                            </div>
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">, / .</span>
+                              <span className="text-slate-300 text-[11px]">Nudge Timing ±50ms</span>
+                            </div>
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">P</span>
+                              <span className="text-slate-300 text-[11px]">Play Selected Line</span>
+                            </div>
+                            <div className="flex items-center justify-between py-0.5">
+                              <span className="font-mono font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 px-1.5 py-0.5 rounded text-[11px]">Ctrl + + / -</span>
+                              <span className="text-slate-300 text-[11px]">Zoom Waveform In / Out</span>
                             </div>
                           </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                          {gapAfter >= 1.8 && nextLine && (
-                            <div className="flex items-center justify-between bg-sky-500/[0.06] px-5 py-1.5 text-[11px] text-sky-300">
-                              <span className="flex items-center gap-1.5 font-medium">
-                                <Music2 className="h-3.5 w-3.5" />
-                                Music Interlude Animation ({formatTimeMs(line.endTime)} →{' '}
-                                {formatTimeMs(nextLine.startTime)} • {gapAfter.toFixed(1)}s)
-                              </span>
-                              <button
-                                type="button"
-                                disabled={!isEditingUnlocked}
-                                onClick={() =>
-                                  updateLineTiming(line.id, line.startTime, nextLine.startTime)
-                                }
-                                className="rounded px-2 py-0.5 text-[10px] text-slate-400 hover:bg-white/10 hover:text-white disabled:opacity-35"
-                              >
-                                Close Gap
-                              </button>
+              {/* Lyric Lines Scrollable List (w-full min-w-0 overflow-x-hidden fixes highlighting!) */}
+              <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden divide-y divide-stage-border/30 slim-scrollbar">
+                {(() => {
+                  const liveIdx = liveStageState.activeLineIndex;
+                  const firstLineStart = draftLines[0]?.startTime ?? 0;
+                  return (
+                    <>
+                      {firstLineStart >= 0.8 && (
+                        <div className="flex items-center justify-between bg-sky-500/[0.06] px-3.5 py-1.5 text-xs text-sky-300 w-full min-w-0">
+                          <span className="flex items-center gap-2">
+                            <Music2 className="h-3.5 w-3.5 shrink-0" />
+                            <span>
+                              Intro Music Animation ({formatTimeMs(0)} → {formatTimeMs(firstLineStart)} • {firstLineStart.toFixed(1)}s)
+                            </span>
+                          </span>
+                        </div>
+                      )}
+
+                      {draftLines.map((line, idx) => {
+                        const isSelected = line.id === selectedLineId;
+                        const isTapTarget = tapMode && idx === tapIndex;
+                        const isLivePlayhead = idx === liveIdx && !liveStageState.isMusicInterlude;
+                        const isModified = isLineModified(line.id);
+                        const durSec = Math.max(0.01, line.endTime - line.startTime);
+                        const nextLine = draftLines[idx + 1];
+                        const gapAfter = nextLine ? nextLine.startTime - line.endTime : 0;
+                        const progressPct = isLivePlayhead
+                          ? Math.max(0, Math.min(100, ((wsTime - line.startTime) / durSec) * 100))
+                          : 0;
+
+                        const isMusicTag = /^\\[.*(music|instrumental|interlude|♪).*\\]$/i.test(line.text.trim());
+
+                        return (
+                          <React.Fragment key={line.id}>
+                            <div
+                              ref={(el) => {
+                                if (el) rowRefs.current.set(line.id, el);
+                                else rowRefs.current.delete(line.id);
+                              }}
+                              onClick={() => setSelectedLineId(line.id)}
+                              className={`group relative flex items-center justify-between gap-2 px-3 py-2 w-full min-w-0 transition-colors cursor-pointer select-none ${
+                                isTapTarget
+                                  ? 'bg-amber-500/20 border-l-4 border-l-amber-400'
+                                  : isLivePlayhead
+                                    ? 'bg-emerald-500/10 border-l-4 border-l-emerald-400'
+                                    : isSelected
+                                      ? 'bg-white/[0.06] border-l-4 border-l-sky-400'
+                                      : 'hover:bg-white/[0.03]'
+                              }`}
+                            >
+                              {/* Live Playhead Progress Bar on bottom edge */}
+                              {isLivePlayhead && (
+                                <div
+                                  className="pointer-events-none absolute bottom-0 left-0 h-0.5 bg-emerald-400 transition-all duration-75"
+                                  style={{ width: `${progressPct}%` }}
+                                />
+                              )}
+
+                              {/* Left: Line Index & Time Badge */}
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="w-5 text-right font-mono text-xs font-semibold text-slate-500">
+                                  {idx + 1}
+                                </span>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedLineId(line.id);
+                                    wsRef.current?.setTime(line.startTime);
+                                  }}
+                                  title="Click to jump playhead to start time"
+                                  className="flex items-center gap-1 rounded-md border border-stage-border/80 bg-stage-bg/80 px-2 py-0.5 font-mono text-[11px] hover:border-amber-500/50"
+                                >
+                                  <span className="text-amber-300">{formatTimeMs(line.startTime)}</span>
+                                  <span className="text-slate-600">→</span>
+                                  <span className="text-sky-300">{formatTimeMs(line.endTime)}</span>
+                                  <span className="text-[10px] text-slate-500 ml-0.5 font-sans">
+                                    {durSec.toFixed(1)}s
+                                  </span>
+                                </button>
+                              </div>
+
+                              {/* Center: Editable Text Input (truncates gracefully, never breaks layout) */}
+                              <div className="flex-1 min-w-0 mx-1.5">
+                                <input
+                                  type="text"
+                                  value={line.text}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onFocus={() => setSelectedLineId(line.id)}
+                                  onChange={(e) => {
+                                    const next = draftLines.map((l) =>
+                                      l.id === line.id ? { ...l, text: e.target.value } : l,
+                                    );
+                                    applyDraftLinesAndRefreshRegions(next);
+                                  }}
+                                  className={`w-full rounded-lg border bg-transparent px-2 py-1 text-sm truncate focus:border-amber-500 focus:bg-stage-bg focus:outline-none ${
+                                    isMusicTag
+                                      ? 'border-sky-500/40 bg-sky-500/10 text-sky-200 font-semibold'
+                                      : 'border-transparent text-slate-100'
+                                  } ${isLivePlayhead ? 'font-semibold text-white' : ''}`}
+                                />
+                              </div>
+
+                              {/* Right: Row Action Buttons */}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {isModified && (
+                                  <span className="rounded bg-amber-500/20 border border-amber-500/40 px-1 py-0.5 text-[9px] font-bold text-amber-300">
+                                    Edited
+                                  </span>
+                                )}
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startTapFromIndex(idx);
+                                  }}
+                                  title="Start Live Sync from this line"
+                                  className="flex items-center gap-1 rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-[11px] font-medium text-slate-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors"
+                                >
+                                  <Crosshair className="h-3 w-3" />
+                                  Sync
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handlePlayLine(line.id);
+                                  }}
+                                  title="Audition this line (P)"
+                                  className="flex items-center gap-1 rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-[11px] font-medium text-amber-300 hover:bg-amber-500/20 transition-colors"
+                                >
+                                  <Play className="h-3 w-3" />
+                                  Play
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const start = line.endTime;
+                                    const nextL = draftLines[idx + 1];
+                                    const end = nextL ? Math.max(start + 1.0, nextL.startTime) : start + 4.0;
+                                    const newMusicLine: SyncedLine = {
+                                      id: `music-${Date.now().toString(36)}`,
+                                      index: idx + 1,
+                                      startTime: Number(start.toFixed(2)),
+                                      endTime: Number(end.toFixed(2)),
+                                      text: '[♪ Instrumental Music]',
+                                      confidence: 1.0,
+                                    };
+                                    const updated = [...draftLines];
+                                    updated.splice(idx + 1, 0, newMusicLine);
+                                    applyDraftLinesAndRefreshRegions(updated);
+                                    setIsEditingUnlocked(true);
+                                    isEditingUnlockedRef.current = true;
+                                    showToast('Inserted instrumental Music Animation break.', 'success');
+                                  }}
+                                  title="Insert music break after this line"
+                                  className="flex items-center gap-1 rounded-lg border border-sky-500/30 bg-sky-500/10 px-2 py-1 text-[11px] font-medium text-sky-300 hover:bg-sky-500/20 transition-colors"
+                                >
+                                  <Music2 className="h-3 w-3" />
+                                  + Music
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const next = draftLines.filter((l) => l.id !== line.id);
+                                    applyDraftLinesAndRefreshRegions(next);
+                                  }}
+                                  title="Delete line"
+                                  className="rounded-lg p-1 text-slate-500 opacity-0 group-hover:opacity-100 hover:bg-rose-500/20 hover:text-rose-400 transition-all"
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </div>
                             </div>
-                          )}
-                        </React.Fragment>
-                      );
-                    })}
-                  </>
-                );
-              })()}
-            </div>
 
-            {/* Clean Keyboard Legend */}
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-stage-border bg-[#0b0d13] px-5 py-1.5 text-[11px] text-slate-400 shrink-0">
-              <span>
-                <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">Ctrl + + / -</kbd> Waveform Zoom
-              </span>
-              <span>
-                <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">Space</kbd>{' '}
-                {tapMode
-                  ? syncMethod === 'hold'
-                    ? 'Hold = Sing, Release = Music'
-                    : 'Stamp Next Line'
-                  : 'Play / Pause'}
-              </span>
-              {tapMode && syncMethod === 'tap' && (
-                <span>
-                  <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">→</kbd> End Line → Music
-                </span>
-              )}
-              {tapMode && (
-                <span>
-                  <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">← / U</kbd> Undo & Rewind
-                </span>
-              )}
-              <span>
-                <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">Enter</kbd> Commit / Next Line
-              </span>
-              <span>
-                <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">[ / ]</kbd> Set Start / End
-              </span>
-              <span>
-                <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">, / .</kbd> Nudge ±50ms
-              </span>
-              <span>
-                <kbd className="rounded bg-white/10 px-1 font-mono text-slate-200">P</kbd> Play Line
-              </span>
+                            {gapAfter >= 1.8 && nextLine && (
+                              <div className="flex items-center justify-between bg-sky-500/[0.06] px-3.5 py-1 text-[11px] text-sky-300 w-full min-w-0">
+                                <span className="flex items-center gap-1.5 font-medium">
+                                  <Music2 className="h-3 w-3" />
+                                  Music Interlude ({formatTimeMs(line.endTime)} → {formatTimeMs(nextLine.startTime)} • {gapAfter.toFixed(1)}s)
+                                </span>
+                                <button
+                                  type="button"
+                                  disabled={!isEditingUnlocked}
+                                  onClick={() => updateLineTiming(line.id, line.startTime, nextLine.startTime)}
+                                  className="rounded px-2 py-0.5 text-[10px] text-slate-400 hover:bg-white/10 hover:text-white disabled:opacity-35"
+                                >
+                                  Close Gap
+                                </button>
+                              </div>
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
+              </div>
             </div>
-          </div>
+          ) : (
+            (!manualSyncVisible || syncLayoutMode === 'stacked') && (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-center bg-stage-bg select-none">
+                {/* Lyric Timeline Hidden Fallback Recovery Card */}
+                <div className="rounded-2xl border border-stage-border/80 bg-stage-card/40 p-6 flex flex-col items-center max-w-md">
+                  <ListMusic className="h-10 w-10 text-slate-500 mb-3" />
+                  <h3 className="text-sm font-bold text-slate-200">Lyric Timeline is Hidden</h3>
+                  <p className="text-xs text-slate-400 mt-1 mb-4">
+                    The lyrics timeline has been minimized. You can restore it or activate manual sync below.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setLyricsTimelineVisible(true)}
+                      className="flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-black hover:bg-amber-400 shadow-md"
+                    >
+                      <ListMusic className="h-3.5 w-3.5" />
+                      Show Lyric Timeline
+                    </button>
+                    {!manualSyncVisible && (
+                      <button
+                        type="button"
+                        onClick={() => setManualSyncVisible(true)}
+                        className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3.5 py-2 text-xs font-semibold text-slate-300 hover:text-white"
+                      >
+                        <Zap className="h-3.5 w-3.5 text-amber-400" />
+                        Show Manual Sync
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          )}
 
           {/* Right Side Pane: Live 16:9 Output Verification (Resizable & Collapsible) */}
           {previewEnabled && (
@@ -3060,13 +3482,23 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
                     <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
                       Live 16:9 Output Verification
                     </span>
-                    <button
-                      type="button"
-                      onClick={() => setStudioTab('config')}
-                      className="text-[11px] font-medium text-amber-300 hover:underline"
-                    >
-                      Edit Look
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setStudioTab('config')}
+                        className="text-[11px] font-medium text-amber-300 hover:underline"
+                      >
+                        Edit Look
+                      </button>
+                      <button
+                        type="button"
+                        onClick={togglePreviewEnabled}
+                        className="rounded p-1 text-slate-400 hover:bg-white/10 hover:text-white transition-colors"
+                        title="Close Live Preview Panel"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
                   <div className="aspect-video w-full overflow-hidden rounded-xl border border-stage-border shadow-lg">
                     <SlideRenderer

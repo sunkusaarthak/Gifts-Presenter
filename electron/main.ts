@@ -455,7 +455,34 @@ async function listAllSongs(): Promise<SongPackage[]> {
     }
   }
 
-  songs.sort((a, b) => a.title.localeCompare(b.title));
+  songs.sort((a, b) => {
+    const orderA = typeof a.orderIndex === 'number' ? a.orderIndex : Infinity;
+    const orderB = typeof b.orderIndex === 'number' ? b.orderIndex : Infinity;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.title.localeCompare(b.title);
+  });
+  return songs;
+}
+
+async function reorderSongsOnDisk(orderedIds: string[]): Promise<SongPackage[]> {
+  await ensureStorageDirs();
+  const idToOrder = new Map(orderedIds.map((id, idx) => [id, idx]));
+  const songs = await listAllSongs();
+
+  for (const song of songs) {
+    const newIdx = idToOrder.get(song.id);
+    if (newIdx !== undefined && song.orderIndex !== newIdx) {
+      song.orderIndex = newIdx;
+      await saveSongToDisk(song);
+    }
+  }
+
+  songs.sort((a, b) => {
+    const orderA = typeof a.orderIndex === 'number' ? a.orderIndex : Infinity;
+    const orderB = typeof b.orderIndex === 'number' ? b.orderIndex : Infinity;
+    if (orderA !== orderB) return orderA - orderB;
+    return a.title.localeCompare(b.title);
+  });
   return songs;
 }
 
@@ -594,6 +621,7 @@ function registerIpcHandlers(): void {
   ipcMain.handle('presentation:getLatest', () => latestPresentationPayload);
 
   ipcMain.handle('songs:list', () => listAllSongs());
+  ipcMain.handle('songs:reorder', async (_event, orderedIds: string[]) => reorderSongsOnDisk(orderedIds));
 
   ipcMain.handle(
     'songs:create',

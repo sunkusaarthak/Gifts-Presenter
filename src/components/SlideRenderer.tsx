@@ -111,8 +111,11 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({
 
   return (
     <div
+      style={{
+        containerType: isPreview ? 'inline-size' : undefined,
+      }}
       className={`relative w-full h-full overflow-hidden bg-black select-none ${
-        isPreview ? 'stage-preview-container' : ''
+        isPreview ? '[container-type:inline-size]' : ''
       }`}
     >
       {/* Double-buffered background Layer A */}
@@ -138,7 +141,13 @@ export const SlideRenderer: React.FC<SlideRendererProps> = ({
       />
 
       {/* Focused Centered Active Lyric Slide OR Instrumental Music Animation */}
-      <div className="relative z-20 w-full h-full flex items-center justify-center text-center px-[8vw]">
+      <div
+        className="relative z-20 w-full h-full flex items-center justify-center text-center"
+        style={{
+          paddingLeft: isPreview ? '8cqw' : '8vw',
+          paddingRight: isPreview ? '8cqw' : '8vw',
+        }}
+      >
         {showText && activeLine ? (
           <div
             key={activeLine.id}

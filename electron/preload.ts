@@ -36,6 +36,7 @@ export interface SatsangAPI {
   createDemoSong: () => Promise<SongPackage>;
   saveSong: (song: SongPackage) => Promise<SongPackage>;
   deleteSong: (songId: string) => Promise<void>;
+  reorderSongs: (orderedIds: string[]) => Promise<SongPackage[]>;
   pickAudioFile: () => Promise<{ filePath: string; fileName: string } | null>;
   readAudioBuffer: (relativePath: string) => Promise<ArrayBuffer>;
 
@@ -117,6 +118,7 @@ const api: SatsangAPI = {
   createDemoSong: () => ipcRenderer.invoke('songs:createDemo'),
   saveSong: (song) => ipcRenderer.invoke('songs:save', song),
   deleteSong: (songId) => ipcRenderer.invoke('songs:delete', songId),
+  reorderSongs: (orderedIds) => ipcRenderer.invoke('songs:reorder', orderedIds),
   pickAudioFile: () => ipcRenderer.invoke('songs:pickAudio'),
   readAudioBuffer: (relativePath) => ipcRenderer.invoke('media:readBuffer', relativePath),
 

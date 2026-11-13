@@ -1,3 +1,5 @@
+import { registerAudioAnalyser } from './audioVisualizerBus';
+
 /**
  * Stage Audio Engine for Window 1 (Master Stage Console).
  * Uses HTML5 <audio> routed through Web Audio GainNode for click-free
@@ -9,6 +11,7 @@ export class StageAudioEngine {
   private ctx: AudioContext | null = null;
   private gainNode: GainNode | null = null;
   private sourceNode: MediaElementAudioSourceNode | null = null;
+  private analyserNode: AnalyserNode | null = null;
   private fadeTimer: number | null = null;
   private currentSinkId = '';
   private isFadingOut = false;
@@ -59,8 +62,13 @@ export class StageAudioEngine {
     this.gainNode = this.ctx.createGain();
     this.gainNode.gain.value = 1;
     this.sourceNode = this.ctx.createMediaElementSource(this.audio);
-    this.sourceNode.connect(this.gainNode);
+    this.analyserNode = this.ctx.createAnalyser();
+    this.analyserNode.fftSize = 256;
+    this.analyserNode.smoothingTimeConstant = 0.7;
+    this.sourceNode.connect(this.analyserNode);
+    this.analyserNode.connect(this.gainNode);
     this.gainNode.connect(this.ctx.destination);
+    registerAudioAnalyser(this.analyserNode);
 
     if (this.currentSinkId) {
       this.applySinkId(this.currentSinkId).catch(() => {});
@@ -207,10 +215,12 @@ export class StageAudioEngine {
     this.audio.pause();
     this.audio.removeAttribute('src');
     this.audio.load();
+    registerAudioAnalyser(null);
     this.ctx?.close().catch(() => {});
     this.ctx = null;
     this.gainNode = null;
     this.sourceNode = null;
+    this.analyserNode = null;
   }
 }
 

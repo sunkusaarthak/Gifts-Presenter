@@ -37,8 +37,11 @@ interface PresenterState {
   saveSong: (song: SongPackage) => Promise<SongPackage>;
   flushSaveActiveSong: (showConfirmation?: boolean) => Promise<void>;
   deleteSong: (songId: string) => Promise<void>;
+  reorderSongs: (orderedIds: string[]) => Promise<void>;
+  moveSong: (songId: string, direction: 'up' | 'down') => Promise<void>;
   updateSyncedLines: (lines: SyncedLine[], rawLyrics?: string) => Promise<void>;
   updateStyleConfig: (patch: Partial<StyleConfig>) => Promise<void>;
+  applyStyleConfigToAllSongs: (options?: { includeOffset?: boolean }) => Promise<number>;
   updateGlobalOffset: (offsetSeconds: number) => Promise<void>;
   importBundle: () => Promise<void>;
   exportBundle: (songId: string) => Promise<void>;
@@ -220,6 +223,43 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
     get().showToast('Song removed from local storage.', 'info');
   },
 
+  reorderSongs: async (orderedIds) => {
+    const { songs } = get();
+    const idToSong = new Map(songs.map((s) => [s.id, s]));
+    const reordered: SongPackage[] = [];
+    for (let i = 0; i < orderedIds.length; i++) {
+      const s = idToSong.get(orderedIds[i]);
+      if (s) {
+        reordered.push({ ...s, orderIndex: i });
+        idToSong.delete(orderedIds[i]);
+      }
+    }
+    for (const remaining of idToSong.values()) {
+      reordered.push({ ...remaining, orderIndex: reordered.length });
+    }
+    set({ songs: reordered });
+    try {
+      await window.satsangAPI.reorderSongs(reordered.map((s) => s.id));
+    } catch (err) {
+      console.error('Failed to persist song order to disk:', err);
+    }
+  },
+
+  moveSong: async (songId, direction) => {
+    const { songs, reorderSongs } = get();
+    const index = songs.findIndex((s) => s.id === songId);
+    if (index < 0) return;
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === songs.length - 1) return;
+
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    const newSongs = [...songs];
+    const [moved] = newSongs.splice(index, 1);
+    newSongs.splice(targetIndex, 0, moved);
+
+    await reorderSongs(newSongs.map((s) => s.id));
+  },
+
   updateSyncedLines: async (lines, rawLyrics) => {
     const { songs, activeSongId } = get();
     const active = songs.find((s) => s.id === activeSongId);
@@ -261,6 +301,45 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
       songs: s.songs.map((item) => (item.id === updated.id ? updated : item)),
     }));
     await window.satsangAPI.saveSong(updated);
+  },
+
+  applyStyleConfigToAllSongs: async (options) => {
+    if (saveDebounceTimer !== null) {
+      window.clearTimeout(saveDebounceTimer);
+      saveDebounceTimer = null;
+    }
+
+    const { songs, activeSongId } = get();
+    const active = songs.find((s) => s.id === activeSongId);
+    if (!active || songs.length === 0) return 0;
+
+    const sourceStyle: StyleConfig = {
+      ...DEFAULT_STYLE_CONFIG,
+      ...active.styleConfig,
+    };
+    const sourceOffset = active.globalOffsetSeconds ?? 0;
+
+    const updatedSongs: SongPackage[] = songs.map((item) => ({
+      ...item,
+      styleConfig: {
+        ...sourceStyle,
+      },
+      ...(options?.includeOffset ? { globalOffsetSeconds: sourceOffset } : {}),
+    }));
+
+    set({ songs: updatedSongs });
+
+    try {
+      await Promise.all(updatedSongs.map((s) => window.satsangAPI.saveSong(s)));
+      get().showToast(
+        `Applied stage look to all ${songs.length} songs successfully!`,
+        'success'
+      );
+      return songs.length;
+    } catch (err) {
+      get().showToast(`Failed to update some songs: ${(err as Error).message}`, 'error');
+      return 0;
+    }
   },
 
   updateGlobalOffset: async (offsetSeconds) => {

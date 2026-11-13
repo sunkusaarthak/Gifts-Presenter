@@ -32,6 +32,7 @@ export interface SongPackage {
   syncedLines: SyncedLine[]; // Strictly sorted by startTime ascending
   styleConfig: StyleConfig;
   globalOffsetSeconds?: number;
+  orderIndex?: number;
   updatedAt?: string;
 }
 

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { DEFAULT_STYLE_CONFIG, type PresentationPayload } from './shared/types';
 import { usePresenterStore } from './store/usePresenterStore';
+import { useUIStore } from './store/useUIStore';
 import { getUiZoom, subscribeUiZoom, zoomUiIn, zoomUiOut, zoomUiReset } from './utils/uiZoom';
 import { LibrarySidebar } from './components/LibrarySidebar';
 import { NewSongModal } from './components/NewSongModal';
