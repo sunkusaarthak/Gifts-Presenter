@@ -8,7 +8,7 @@ import type {
   StyleConfig,
   SyncedLine,
 } from '../shared/types';
-import { DEFAULT_STYLE_CONFIG, normalizeGeminiModel } from '../shared/types';
+import { DEFAULT_STYLE_CONFIG } from '../shared/types';
 import type { CreateSongInput } from '../../electron/preload';
 
 export type ConsoleMode = 'studio' | 'stage';
@@ -28,6 +28,9 @@ interface PresenterState {
   activeLineIndex: number;
   isLoading: boolean;
   toast: { type: 'info' | 'error' | 'success'; text: string } | null;
+  pendingZip: { filePath: string; fileName: string } | null;
+  newProjectModalOpen: boolean;
+  closeWindowModalOpen: boolean;
 
   initialize: () => Promise<() => void>;
   setMode: (mode: ConsoleMode) => void;
@@ -43,9 +46,19 @@ interface PresenterState {
   updateStyleConfig: (patch: Partial<StyleConfig>) => Promise<void>;
   applyStyleConfigToAllSongs: (options?: { includeOffset?: boolean }) => Promise<number>;
   updateGlobalOffset: (offsetSeconds: number) => Promise<void>;
+  setPendingZip: (zip: { filePath: string; fileName: string } | null) => void;
+  setNewProjectModalOpen: (open: boolean) => void;
+  setCloseWindowModalOpen: (open: boolean) => void;
+  confirmCloseWindow: () => Promise<void>;
+  triggerImportZipPicker: () => Promise<void>;
+  importProjectFromPath: (filePath: string) => Promise<boolean>;
+  newProject: () => Promise<void>;
+  openInNewWindow: (filePath?: string) => Promise<boolean>;
+  openNewEmptyWindow: () => Promise<boolean>;
   importBundle: () => Promise<void>;
+  loadDemoSong: () => Promise<boolean>;
   exportBundle: (songId: string) => Promise<void>;
-  exportProject: () => Promise<void>;
+  exportProject: () => Promise<{ canceled: boolean; filePath?: string; songCount?: number }>;
   importProject: () => Promise<void>;
   refreshAssets: () => Promise<void>;
   importBackgroundAsset: () => Promise<MediaAsset | null>;
@@ -76,8 +89,6 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
     preferredDisplayId: null,
     elevenLabsApiKey: '',
     localAlignerCommand: '',
-    geminiApiKey: '',
-    geminiModel: 'gemini-3.8-flash',
   },
   isPresenting: false,
   isPreviewFallback: false,
@@ -87,6 +98,106 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
   activeLineIndex: -1,
   isLoading: true,
   toast: null,
+  pendingZip: null,
+  newProjectModalOpen: false,
+  closeWindowModalOpen: false,
+
+  setPendingZip: (zip) => set({ pendingZip: zip }),
+  setNewProjectModalOpen: (open) => set({ newProjectModalOpen: open }),
+  setCloseWindowModalOpen: (open) => set({ closeWindowModalOpen: open }),
+  confirmCloseWindow: async () => {
+    try {
+      if (window.satsangAPI?.confirmCloseWindow) {
+        await window.satsangAPI.confirmCloseWindow();
+      } else {
+        window.close();
+      }
+    } catch {
+      window.close();
+    }
+  },
+
+  triggerImportZipPicker: async () => {
+    try {
+      const picked = await window.satsangAPI.pickZipFile();
+      if (picked) {
+        set({ pendingZip: picked });
+      }
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message || '';
+      // If Electron main process hasn't been restarted after new IPC handlers were added:
+      if (msg.includes('dialog:pickZip')) {
+        try {
+          const res = await window.satsangAPI.importProject();
+          if (res) {
+            set({
+              songs: res.songs,
+              activeSongId: res.songs[0]?.id ?? null,
+            });
+            get().showToast(`Imported project with ${res.importedCount} songs! (Restart npm run dev for new-window option)`, 'success');
+          }
+        } catch (innerErr) {
+          get().showToast(`Import failed: ${(innerErr as Error).message}`, 'error');
+        }
+        return;
+      }
+      get().showToast(`Failed to select zip archive: ${msg}`, 'error');
+    }
+  },
+
+  importProjectFromPath: async (filePath: string) => {
+    try {
+      const res = await window.satsangAPI.importProject(filePath);
+      if (!res) return false;
+      set({
+        songs: res.songs,
+        activeSongId: res.songs[0]?.id ?? null,
+      });
+      get().showToast(`Imported project with ${res.importedCount} songs!`, 'success');
+      return true;
+    } catch (err) {
+      get().showToast(`Import failed: ${(err as Error).message}`, 'error');
+      return false;
+    }
+  },
+
+  newProject: async () => {
+    try {
+      await window.satsangAPI.newProject();
+      set({
+        songs: [],
+        activeSongId: null,
+        isPlaying: false,
+        currentTime: 0,
+        activeLineIndex: -1,
+      });
+      get().showToast('Started new blank project.', 'success');
+    } catch (err) {
+      get().showToast(`Failed to reset project: ${(err as Error).message}`, 'error');
+    }
+  },
+
+  openInNewWindow: async (filePath?: string) => {
+    try {
+      await window.satsangAPI.openNewWindow(filePath ? { initialZipPath: filePath } : undefined);
+      get().showToast('Opening project in new window...', 'info');
+      return true;
+    } catch (err) {
+      get().showToast(`Failed to open new window: ${(err as Error).message}`, 'error');
+      return false;
+    }
+  },
+
+  openNewEmptyWindow: async () => {
+    try {
+      await window.satsangAPI.openNewWindow({ isNewProject: true });
+      get().showToast('Opened new empty project window.', 'info');
+      return true;
+    } catch (err) {
+      get().showToast(`Failed to open new window: ${(err as Error).message}`, 'error');
+      return false;
+    }
+  },
 
   showToast: (text, type = 'info') => {
     if (toastTimer !== null) window.clearTimeout(toastTimer);
@@ -114,10 +225,7 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
         activeSongId: songs[0]?.id ?? null,
         displays,
         assets,
-        settings: {
-          ...settings,
-          geminiModel: normalizeGeminiModel(settings.geminiModel),
-        },
+        settings,
         isLoading: false,
       });
     } catch (err) {
@@ -133,9 +241,19 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
       set({ isPresenting: false, isPreviewFallback: false });
     });
 
+    const unsubCloseRequest = window.satsangAPI?.onWindowRequestClose?.(async () => {
+      const currentSongs = get().songs;
+      if (currentSongs.length === 0) {
+        await get().confirmCloseWindow();
+      } else {
+        set({ closeWindowModalOpen: true });
+      }
+    });
+
     return () => {
-      unsubDisplays();
-      unsubClosed();
+      unsubDisplays?.();
+      unsubClosed?.();
+      unsubCloseRequest?.();
     };
   },
 
@@ -359,16 +477,27 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
   },
 
   importBundle: async () => {
+    await get().triggerImportZipPicker();
+  },
+
+  loadDemoSong: async () => {
     try {
-      const imported = await window.satsangAPI.importSongBundle();
-      if (!imported) return;
-      set((s) => ({
-        songs: [...s.songs, imported].sort((a, b) => a.title.localeCompare(b.title)),
-        activeSongId: imported.id,
-      }));
-      get().showToast(`Imported "${imported.title}" (.satsang.zip).`, 'success');
+      if (window.satsangAPI?.loadDemoSong) {
+        const imported = await window.satsangAPI.loadDemoSong();
+        if (imported) {
+          const songs = await window.satsangAPI.listSongs();
+          set({
+            songs,
+            activeSongId: imported.id,
+          });
+          get().showToast('Loaded demo bhajan package!', 'success');
+          return true;
+        }
+      }
+      return false;
     } catch (err) {
-      get().showToast(`Import failed: ${(err as Error).message}`, 'error');
+      get().showToast(`Failed to load demo song: ${(err as Error).message}`, 'error');
+      return false;
     }
   },
 
@@ -385,27 +514,20 @@ export const usePresenterStore = create<PresenterState>((set, get) => ({
 
   exportProject: async () => {
     try {
+      await get().flushSaveActiveSong(false);
       const res = await window.satsangAPI.exportProject();
       if (!res.canceled) {
         get().showToast(`Exported full project (${res.songCount} songs) successfully!`, 'success');
       }
+      return res;
     } catch (err) {
       get().showToast(`Project export failed: ${(err as Error).message}`, 'error');
+      return { canceled: true };
     }
   },
 
   importProject: async () => {
-    try {
-      const res = await window.satsangAPI.importProject();
-      if (!res) return;
-      set({
-        songs: res.songs,
-        activeSongId: res.songs[0]?.id ?? null,
-      });
-      get().showToast(`Imported project with ${res.importedCount} songs!`, 'success');
-    } catch (err) {
-      get().showToast(`Project import failed: ${(err as Error).message}`, 'error');
-    }
+    await get().triggerImportZipPicker();
   },
 
   refreshAssets: async () => {

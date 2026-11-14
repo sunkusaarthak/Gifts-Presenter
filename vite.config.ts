@@ -11,6 +11,7 @@ export default defineConfig({
     outDir: 'dist',
     emptyOutDir: true,
     target: 'esnext',
+    assetsInlineLimit: 200000,
   },
   server: {
     port: 5173,

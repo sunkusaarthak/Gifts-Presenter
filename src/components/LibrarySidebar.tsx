@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import {
   ArrowDownAZ,
+  ArrowUpDown,
   ChevronDown,
   ChevronUp,
   Download,
@@ -15,6 +16,7 @@ import {
 } from 'lucide-react';
 import { usePresenterStore } from '../store/usePresenterStore';
 import { useUIStore } from '../store/useUIStore';
+import appLogo from '../assets/logo.webp';
 
 interface LibrarySidebarProps {
   onNewSong: () => void;
@@ -33,6 +35,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
   const selectSong = usePresenterStore((s) => s.selectSong);
   const deleteSong = usePresenterStore((s) => s.deleteSong);
   const importBundle = usePresenterStore((s) => s.importBundle);
+  const loadDemoSong = usePresenterStore((s) => s.loadDemoSong);
   const exportBundle = usePresenterStore((s) => s.exportBundle);
   const reorderSongs = usePresenterStore((s) => s.reorderSongs);
   const moveSong = usePresenterStore((s) => s.moveSong);
@@ -43,6 +46,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
   const toggleSidebarCollapsed = useUIStore((s) => s.toggleSidebarCollapsed);
 
   const [query, setQuery] = useState('');
+  const [isReordering, setIsReordering] = useState(false);
   const [draggedSongId, setDraggedSongId] = useState<string | null>(null);
   const [dragOverSongId, setDragOverSongId] = useState<string | null>(null);
 
@@ -137,7 +141,7 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
         </button>
 
         <img
-          src="/logo.webp"
+          src={appLogo}
           alt="Gifts Logo"
           className="h-7 w-7 rounded-lg object-cover border border-amber-500/40 shadow-sm"
           title="Gifts Presenter"
@@ -188,12 +192,12 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
           <div className="flex items-center gap-1.5 shrink-0">
             <button
               type="button"
-              onClick={handleSortAlphabetical}
-              title="Sort songs alphabetically (A-Z)"
+              onClick={loadDemoSong}
+              title="Load sample demo bhajan package (.zip)"
               className="flex items-center gap-1 rounded-lg border border-stage-border bg-stage-card px-2 py-1 text-[10px] font-medium text-slate-300 hover:border-amber-500/50 hover:text-amber-300 transition-colors shrink-0"
             >
-              <ArrowDownAZ className="h-3 w-3 text-amber-400" />
-              <span>A-Z</span>
+              <Download className="h-3 w-3 text-amber-400" />
+              <span>Load Demo</span>
             </button>
             <button
               type="button"
@@ -226,6 +230,33 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
             className="w-full rounded-xl border border-stage-border bg-stage-bg pl-8 pr-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none transition-colors"
           />
         </div>
+
+        {/* Change Order & Alphabetical Sort Controls */}
+        <div className="flex items-center justify-between gap-1.5 pt-0.5">
+          <button
+            type="button"
+            onClick={() => setIsReordering((prev) => !prev)}
+            title={isReordering ? 'Finish reordering (hide move buttons)' : 'Display buttons to change song order'}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer ${
+              isReordering
+                ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow-sm ring-1 ring-amber-400/40'
+                : 'border-stage-border bg-stage-card text-slate-300 hover:border-amber-500/40 hover:text-white'
+            }`}
+          >
+            <ArrowUpDown className="h-3 w-3 text-amber-400" />
+            <span>{isReordering ? 'Done Ordering' : 'Change Order'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSortAlphabetical}
+            title="Sort songs alphabetically (A-Z)"
+            className="flex items-center gap-1 rounded-lg border border-stage-border bg-stage-card px-2.5 py-1 text-[10px] font-medium text-slate-300 hover:border-amber-500/40 hover:text-amber-300 transition-colors shrink-0"
+          >
+            <ArrowDownAZ className="h-3 w-3 text-amber-400" />
+            <span>A-Z</span>
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2 space-y-1 slim-scrollbar">
@@ -241,14 +272,24 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
                   Click &ldquo;+ Add Song&rdquo; above to import an audio track (.mp3, .wav) with lyrics.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={onNewSong}
-                className="flex items-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-all active:scale-[0.98]"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                <span>Add First Song</span>
-              </button>
+              <div className="flex flex-col gap-2 w-full pt-1">
+                <button
+                  type="button"
+                  onClick={onNewSong}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3.5 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 transition-all active:scale-[0.98]"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add First Song</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={loadDemoSong}
+                  className="flex items-center justify-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-3.5 py-2 text-xs font-medium text-slate-300 hover:border-amber-500/40 hover:text-amber-300 transition-all active:scale-[0.98]"
+                >
+                  <Download className="h-3.5 w-3.5 text-amber-400" />
+                  <span>Load Demo Song</span>
+                </button>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center justify-center text-center px-4 py-8 space-y-2">
@@ -268,48 +309,122 @@ export const LibrarySidebar: React.FC<LibrarySidebarProps> = ({ onNewSong }) => 
         ) : (
           filtered.map((song) => {
             const isActive = song.id === activeSongId;
+            const isDragging = draggedSongId === song.id;
+            const isDragOver = dragOverSongId === song.id;
+            const canReorder = !query.trim();
+            const realIndex = songs.findIndex((s) => s.id === song.id);
+            const isFirst = realIndex === 0;
+            const isLast = realIndex === songs.length - 1;
+
             return (
               <div
                 key={song.id}
+                draggable={canReorder}
+                onDragStart={(e) => handleDragStart(e, song.id)}
+                onDragOver={(e) => handleDragOver(e, song.id)}
+                onDrop={(e) => handleDrop(e, song.id)}
+                onDragEnd={handleDragEnd}
                 onClick={() => selectSong(song.id)}
-                className={`group flex items-center justify-between rounded-xl px-3 py-2.5 cursor-pointer border transition-colors ${
-                  isActive
+                className={`group relative flex items-center justify-between rounded-xl px-2 py-2 cursor-pointer border transition-all ${
+                  isDragging
+                    ? 'opacity-40 border-dashed border-amber-500 bg-amber-500/10'
+                    : isDragOver
+                    ? 'border-amber-400 bg-amber-500/25 shadow-md translate-y-0.5'
+                    : isActive
                     ? 'border-amber-500/60 bg-amber-500/15 text-white shadow-sm'
                     : 'border-transparent hover:bg-white/5 text-slate-300'
                 }`}
               >
-                <div className="min-w-0 flex-1 pr-2">
-                  <div className="truncate text-xs font-semibold">{song.title}</div>
-                  <div className="mt-0.5 flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                {/* Drag handle & Order Index - Dots at the front */}
+                <div className="flex items-center gap-1.5 shrink-0 mr-1.5 text-slate-500 group-hover:text-amber-400/80 transition-colors">
+                  <div
+                    className={`p-0.5 rounded hover:bg-white/10 ${
+                      canReorder ? 'cursor-grab active:cursor-grabbing text-slate-400 hover:text-amber-300' : 'cursor-not-allowed opacity-30'
+                    }`}
+                    title={canReorder ? 'Drag to reorder songs' : 'Clear search filter to reorder'}
+                  >
+                    <GripVertical className="h-3.5 w-3.5" />
+                  </div>
+                  <span className="font-mono text-[10px] font-semibold text-slate-500 w-4 text-center">
+                    {String(realIndex + 1).padStart(2, '0')}
+                  </span>
+                </div>
+
+                {/* Song Title & Metadata - Given maximum space to display name fully */}
+                <div className="min-w-0 flex-1 pr-1">
+                  <div className="truncate text-xs font-semibold text-slate-200 group-hover:text-white" title={song.title}>
+                    {song.title}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[10px] text-slate-400 font-mono">
                     <span>{song.syncedLines.length} lines</span>
                     <span>•</span>
                     <span>{formatDuration(song.duration)}</span>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button
-                    type="button"
-                    title="Export .satsang.zip bundle"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      exportBundle(song.id);
-                    }}
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-amber-300"
-                  >
-                    <Download className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    title="Delete song"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      deleteSong(song.id);
-                    }}
-                    className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
+
+                {/* Right-side controls: When ordering is ON, replace Download & Bin with Up/Down buttons! */}
+                {isReordering && canReorder ? (
+                  <div className="flex items-center gap-0.5 shrink-0 bg-black/60 rounded-lg p-0.5 border border-amber-500/30">
+                    <button
+                      type="button"
+                      title="Move Up"
+                      disabled={isFirst}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveSong(song.id, 'up');
+                      }}
+                      className={`rounded p-1 transition-colors ${
+                        isFirst
+                          ? 'opacity-25 cursor-not-allowed text-slate-600'
+                          : 'text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 active:scale-95'
+                      }`}
+                    >
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Move Down"
+                      disabled={isLast}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        moveSong(song.id, 'down');
+                      }}
+                      className={`rounded p-1 transition-colors ${
+                        isLast
+                          ? 'opacity-25 cursor-not-allowed text-slate-600'
+                          : 'text-slate-200 hover:bg-amber-500/20 hover:text-amber-300 active:scale-95'
+                      }`}
+                    >
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  /* When ordering is OFF, show Export Bundle & Delete Song buttons on hover */
+                  <div className="hidden group-hover:flex items-center gap-0.5 shrink-0">
+                    <button
+                      type="button"
+                      title="Export .satsang.zip bundle"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        exportBundle(song.id);
+                      }}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-white/10 hover:text-amber-300 transition-colors"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete song"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSong(song.id);
+                      }}
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-500/20 hover:text-rose-400 transition-colors"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             );
           })

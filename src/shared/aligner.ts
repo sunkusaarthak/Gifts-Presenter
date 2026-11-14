@@ -1,4 +1,4 @@
-import type { AlignedWord, GeminiAlignedLine, SyncedLine } from './types';
+import type { AlignedWord, SyncedLine } from './types';
 import { normalizeSyncedLines } from './binarySearch';
 import { splitRawLyrics } from './lrc';
 
@@ -598,77 +598,6 @@ export function mapWordsToLyricLines(
   }
 
   return normalizeSyncedLines(provisional, totalDuration);
-}
-
-/**
- * Converts Gemini Audio alignment results ({ index, startSec, endSec }) into
- * strictly monotonic SyncedLine[], clamping to audio duration and interpolating
- * any missing indices deterministically.
- */
-export function buildLinesFromGeminiAlignments(
-  rawLyrics: string,
-  alignments: readonly GeminiAlignedLine[],
-  totalDuration?: number,
-): SyncedLine[] {
-  const lines = splitRawLyrics(rawLyrics);
-  if (lines.length === 0) return [];
-
-  const byIndex = new Map<number, GeminiAlignedLine>();
-  for (const item of alignments) {
-    if (
-      Number.isInteger(item.index) &&
-      item.index >= 0 &&
-      item.index < lines.length &&
-      Number.isFinite(item.startSec)
-    ) {
-      byIndex.set(item.index, item);
-    }
-  }
-
-  const maxDur =
-    totalDuration && totalDuration > 0
-      ? totalDuration
-      : Math.max(10, ...Array.from(byIndex.values()).map((v) => v.endSec || v.startSec + 3));
-
-  const out: SyncedLine[] = [];
-  for (let i = 0; i < lines.length; i++) {
-    const hit = byIndex.get(i);
-    const prevEnd = i > 0 ? out[i - 1].endTime : 0;
-    if (hit) {
-      const start = Math.max(i > 0 ? out[i - 1].startTime + 0.05 : 0, Math.min(maxDur - 0.1, hit.startSec));
-      const rawEnd = Number.isFinite(hit.endSec) && hit.endSec > start ? hit.endSec : start + 2.5;
-      const end = Math.min(maxDur, Math.max(start + 0.15, rawEnd));
-      out.push({
-        id: `line-${i}-${Math.random().toString(36).slice(2, 7)}`,
-        index: i,
-        startTime: Number(start.toFixed(3)),
-        endTime: Number(end.toFixed(3)),
-        text: lines[i],
-      });
-    } else {
-      // Find next matched start
-      let nextStart = maxDur;
-      let missingCount = 1;
-      for (let q = i + 1; q < lines.length; q++) {
-        const nextHit = byIndex.get(q);
-        if (nextHit) {
-          nextStart = Math.max(prevEnd + 0.2, nextHit.startSec);
-          break;
-        }
-        missingCount++;
-      }
-      const slot = Math.max(0.25, (nextStart - prevEnd) / missingCount);
-      out.push({
-        id: `line-${i}-${Math.random().toString(36).slice(2, 7)}`,
-        index: i,
-        startTime: Number(prevEnd.toFixed(3)),
-        endTime: Number(Math.min(maxDur, prevEnd + slot).toFixed(3)),
-        text: lines[i],
-      });
-    }
-  }
-
-  return normalizeSyncedLines(out, totalDuration);
 }
 
 /**

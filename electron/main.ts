@@ -18,15 +18,11 @@ import { Readable } from 'node:stream';
 import { promisify } from 'node:util';
 import JSZip from 'jszip';
 import { normalizeSyncedLines } from '../src/shared/binarySearch';
-import { splitRawLyrics } from '../src/shared/lrc';
 import {
   DEFAULT_STYLE_CONFIG,
-  normalizeGeminiModel,
   type AlignedWord,
   type AppSettings,
   type DisplayInfo,
-  type GeminiAlignedLine,
-  type GeminiAlignModel,
   type MediaAsset,
   type PresentationPayload,
   type SongPackage,
@@ -49,41 +45,60 @@ protocol.registerSchemesAsPrivileged([
 ]);
 
 let mainWindow: BrowserWindow | null = null;
+const activeMainWindows = new Set<BrowserWindow>();
+const closingAllowedWindows = new Set<number>();
+const initialDataByWindowId = new Map<number, { initialZipPath?: string; isNewProject?: boolean }>();
 let outputWindow: BrowserWindow | null = null;
 let powerSaveId: number | null = null;
 let latestPresentationPayload: PresentationPayload | null = null;
 
-function getStorageRoot(): string {
+function getStorageRoot(winId?: number): string {
+  if (winId && winId > 1) {
+    return path.join(app.getPath('userData'), 'satsang-presenter', 'windows', `win-${winId}`);
+  }
   return path.join(app.getPath('userData'), 'satsang-presenter');
 }
 
-function getSongsDir(): string {
-  return path.join(getStorageRoot(), 'songs');
+function getSongsDir(winId?: number): string {
+  return path.join(getStorageRoot(winId), 'songs');
 }
 
-function getBackgroundsDir(): string {
-  return path.join(getStorageRoot(), 'assets', 'backgrounds');
+function getBackgroundsDir(winId?: number): string {
+  return path.join(getStorageRoot(winId), 'assets', 'backgrounds');
 }
 
-function getFontsDir(): string {
-  return path.join(getStorageRoot(), 'assets', 'fonts');
+function getFontsDir(winId?: number): string {
+  return path.join(getStorageRoot(winId), 'assets', 'fonts');
 }
 
-function getSettingsPath(): string {
-  return path.join(getStorageRoot(), 'settings.json');
+function getSettingsPath(winId?: number): string {
+  return path.join(getStorageRoot(winId), 'settings.json');
 }
 
-async function ensureStorageDirs(): Promise<void> {
-  await fsp.mkdir(getSongsDir(), { recursive: true });
-  await fsp.mkdir(getBackgroundsDir(), { recursive: true });
-  await fsp.mkdir(getFontsDir(), { recursive: true });
+async function ensureStorageDirs(winId?: number): Promise<void> {
+  await fsp.mkdir(getSongsDir(winId), { recursive: true });
+  await fsp.mkdir(getBackgroundsDir(winId), { recursive: true });
+  await fsp.mkdir(getFontsDir(winId), { recursive: true });
 }
 
-function resolveSafeStoragePath(relativePath: string): string {
-  const root = path.resolve(getStorageRoot());
+function resolveSafeStoragePath(relativePath: string, winId?: number): string {
+  const baseRoot = path.resolve(getStorageRoot());
+  const root = path.resolve(getStorageRoot(winId));
   const cleaned = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
-  const resolved = path.resolve(root, cleaned);
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+
+  let resolved: string;
+  if (cleaned.startsWith('windows/')) {
+    resolved = path.resolve(baseRoot, cleaned);
+  } else {
+    resolved = path.resolve(root, cleaned);
+  }
+
+  if (
+    resolved !== root &&
+    !resolved.startsWith(root + path.sep) &&
+    resolved !== baseRoot &&
+    !resolved.startsWith(baseRoot + path.sep)
+  ) {
     throw new Error(`Unsafe path traversal blocked: ${relativePath}`);
   }
   return resolved;
@@ -199,9 +214,7 @@ function getAllDisplayInfos(): DisplayInfo[] {
 
 function pickTargetExternalDisplay(preferredDisplayId?: number | null): Electron.Display | null {
   const primary = screen.getPrimaryDisplay();
-  const externals = screen.getAllDisplays().filter(
-    (d) => d.id !== primary.id || d.bounds.x !== 0 || d.bounds.y !== 0,
-  );
+  const externals = screen.getAllDisplays().filter((d) => d.id !== primary.id);
   if (externals.length === 0) return null;
   if (preferredDisplayId != null) {
     const preferred = externals.find((d) => d.id === preferredDisplayId);
@@ -252,50 +265,104 @@ function getAppIconPath(): string | undefined {
   return undefined;
 }
 
-function createMainWindow(): void {
+function createMainWindow(params?: { initialZipPath?: string; isNewProject?: boolean }): BrowserWindow {
   nativeTheme.themeSource = 'dark';
   const primary = screen.getPrimaryDisplay();
   const iconPath = getAppIconPath();
-  mainWindow = new BrowserWindow({
+  const isMac = process.platform === 'darwin';
+  const win = new BrowserWindow({
     width: Math.min(1480, primary.workAreaSize.width),
     height: Math.min(920, primary.workAreaSize.height),
     minWidth: 1120,
     minHeight: 700,
     backgroundColor: '#08090c',
     title: 'Gifts Presenter',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#0b0d13',
-      symbolColor: '#f1f5f9',
-      height: 38,
-    },
+    titleBarStyle: isMac ? 'hiddenInset' : 'hidden',
+    titleBarOverlay: isMac
+      ? false
+      : {
+          color: '#0b0d13',
+          symbolColor: '#f1f5f9',
+          height: 42,
+        },
+    trafficLightPosition: isMac ? { x: 14, y: 13 } : undefined,
     icon: iconPath,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false,
     },
   });
 
-  if (iconPath && mainWindow) {
-    mainWindow.setIcon(iconPath);
+  if (iconPath) {
+    win.setIcon(iconPath);
+  }
+
+  activeMainWindows.add(win);
+  if (!mainWindow) {
+    mainWindow = win;
+  }
+
+  if (params) {
+    initialDataByWindowId.set(win.id, params);
   }
 
   const target = getRendererEntryUrl();
   if (target.devUrl) {
-    mainWindow.loadURL(target.devUrl);
+    win.loadURL(target.devUrl);
   } else if (target.filePath) {
-    mainWindow.loadFile(target.filePath);
+    win.loadFile(target.filePath);
   }
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-    if (outputWindow && !outputWindow.isDestroyed()) {
-      outputWindow.close();
-      outputWindow = null;
+  // Intercept window close to prompt saving via custom dark UI modal if project is not empty
+  win.on('close', async (e) => {
+    if (closingAllowedWindows.has(win.id)) {
+      closingAllowedWindows.delete(win.id);
+      return;
+    }
+
+    if (win.isDestroyed() || win.webContents.isDestroyed() || win.webContents.isCrashed()) {
+      return;
+    }
+
+    const winId = win.id;
+    const songs = await listAllSongs(winId).catch(() => []);
+    if (songs.length === 0) {
+      // Empty project, close immediately
+      closingAllowedWindows.add(win.id);
+      return;
+    }
+
+    // Intercept native close and notify renderer to display custom dark spiritual UI modal
+    e.preventDefault();
+    win.webContents.send('window:request-close');
+  });
+
+  win.on('closed', () => {
+    closingAllowedWindows.delete(win.id);
+    activeMainWindows.delete(win);
+    initialDataByWindowId.delete(win.id);
+    if (mainWindow === win) {
+      mainWindow = activeMainWindows.values().next().value ?? null;
+    }
+
+    // Clean up temporary workspace for secondary windows
+    if (win.id > 1) {
+      const tempDir = path.join(getStorageRoot(), 'windows', `win-${win.id}`);
+      fsp.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+    }
+
+    if (activeMainWindows.size === 0) {
+      if (outputWindow && !outputWindow.isDestroyed()) {
+        outputWindow.close();
+        outputWindow = null;
+      }
     }
   });
+
+  return win;
 }
 
 function openOrUpdateOutputWindow(
@@ -321,6 +388,8 @@ function openOrUpdateOutputWindow(
 
   const preloadPath = path.join(__dirname, 'preload.cjs');
   const iconPath = getAppIconPath();
+  const isMac = process.platform === 'darwin';
+
   if (externalDisplay) {
     outputWindow = new BrowserWindow({
       x: externalDisplay.bounds.x,
@@ -329,9 +398,11 @@ function openOrUpdateOutputWindow(
       height: externalDisplay.bounds.height,
       frame: false,
       titleBarStyle: 'hidden',
-      fullscreen: true,
-      simpleFullscreen: true,
-      kiosk: true,
+      fullscreen: !isMac,
+      simpleFullscreen: false,
+      kiosk: !isMac,
+      hasShadow: false,
+      enableLargerThanScreen: true,
       alwaysOnTop: true,
       skipTaskbar: true,
       autoHideMenuBar: true,
@@ -341,6 +412,7 @@ function openOrUpdateOutputWindow(
         preload: preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
+        backgroundThrottling: false,
       },
     });
     outputWindow.setBounds(externalDisplay.bounds);
@@ -364,6 +436,7 @@ function openOrUpdateOutputWindow(
         preload: preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
+        backgroundThrottling: false,
       },
     });
     outputWindow.setAspectRatio(16 / 9);
@@ -391,8 +464,10 @@ function openOrUpdateOutputWindow(
 
   outputWindow.on('closed', () => {
     outputWindow = null;
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('presentation:closed');
+    for (const win of activeMainWindows) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('presentation:closed');
+      }
     }
   });
 
@@ -403,28 +478,39 @@ function configureOutputWindowDisplay(
   win: BrowserWindow,
   externalDisplay: Electron.Display | null,
 ): void {
+  const isMac = process.platform === 'darwin';
   if (externalDisplay) {
     win.setBounds(externalDisplay.bounds);
-    if (!win.isFullScreen()) {
-      win.setFullScreen(true);
+    if (!isMac) {
+      if (!win.isFullScreen()) {
+        win.setFullScreen(true);
+      }
+      win.setKiosk(true);
+    } else {
+      win.setKiosk(false);
+      win.setSimpleFullScreen(false);
     }
-    win.setKiosk(true);
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
     win.webContents.insertCSS('* { cursor: none !important; }').catch(() => {});
   } else {
-    win.setKiosk(false);
-    if (win.isFullScreen()) {
-      win.setFullScreen(false);
+    if (!isMac) {
+      win.setKiosk(false);
+      if (win.isFullScreen()) {
+        win.setFullScreen(false);
+      }
     }
+    win.setAlwaysOnTop(true);
     win.setAspectRatio(16 / 9);
   }
 }
 
 function broadcastDisplays(): void {
   const displays = getAllDisplayInfos();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('displays:changed', displays);
+  for (const win of activeMainWindows) {
+    if (!win.isDestroyed()) {
+      win.webContents.send('displays:changed', displays);
+    }
   }
   if (outputWindow && !outputWindow.isDestroyed() && latestPresentationPayload?.isPresenting) {
     const ext = pickTargetExternalDisplay(null);
@@ -435,10 +521,10 @@ function broadcastDisplays(): void {
   }
 }
 
-async function listAllSongs(): Promise<SongPackage[]> {
-  await ensureStorageDirs();
-  const songsDir = getSongsDir();
-  const entries = await fsp.readdir(songsDir, { withFileTypes: true });
+async function listAllSongs(winId?: number): Promise<SongPackage[]> {
+  await ensureStorageDirs(winId);
+  const songsDir = getSongsDir(winId);
+  const entries = await fsp.readdir(songsDir, { withFileTypes: true }).catch(() => []);
   const songs: SongPackage[] = [];
 
   for (const entry of entries) {
@@ -464,16 +550,16 @@ async function listAllSongs(): Promise<SongPackage[]> {
   return songs;
 }
 
-async function reorderSongsOnDisk(orderedIds: string[]): Promise<SongPackage[]> {
-  await ensureStorageDirs();
+async function reorderSongsOnDisk(orderedIds: string[], winId?: number): Promise<SongPackage[]> {
+  await ensureStorageDirs(winId);
   const idToOrder = new Map(orderedIds.map((id, idx) => [id, idx]));
-  const songs = await listAllSongs();
+  const songs = await listAllSongs(winId);
 
   for (const song of songs) {
     const newIdx = idToOrder.get(song.id);
     if (newIdx !== undefined && song.orderIndex !== newIdx) {
       song.orderIndex = newIdx;
-      await saveSongToDisk(song);
+      await saveSongToDisk(song, winId);
     }
   }
 
@@ -486,9 +572,9 @@ async function reorderSongsOnDisk(orderedIds: string[]): Promise<SongPackage[]> 
   return songs;
 }
 
-async function saveSongToDisk(song: SongPackage): Promise<SongPackage> {
-  await ensureStorageDirs();
-  const songDir = path.join(getSongsDir(), song.id);
+async function saveSongToDisk(song: SongPackage, winId?: number): Promise<SongPackage> {
+  await ensureStorageDirs(winId);
+  const songDir = path.join(getSongsDir(winId), song.id);
   await fsp.mkdir(songDir, { recursive: true });
   const normalized: SongPackage = {
     ...song,
@@ -503,32 +589,223 @@ async function saveSongToDisk(song: SongPackage): Promise<SongPackage> {
   return normalized;
 }
 
-async function readSettingsFromDisk(): Promise<AppSettings> {
+async function readSettingsFromDisk(winId?: number): Promise<AppSettings> {
   const defaults: AppSettings = {
     audioSinkId: '',
     preferredDisplayId: null,
     elevenLabsApiKey: '',
     localAlignerCommand: '',
-    geminiApiKey: '',
-    geminiModel: 'gemini-3.8-flash',
   };
   try {
-    const raw = await fsp.readFile(getSettingsPath(), 'utf-8');
+    const raw = await fsp.readFile(getSettingsPath(winId), 'utf-8');
     const parsed = JSON.parse(raw) as Partial<AppSettings>;
     return {
       ...defaults,
       ...parsed,
-      geminiModel: normalizeGeminiModel(parsed.geminiModel),
     } satisfies AppSettings;
   } catch {
     return defaults;
   }
 }
 
-async function writeSettingsToDisk(settings: AppSettings): Promise<AppSettings> {
-  await ensureStorageDirs();
-  await fsp.writeFile(getSettingsPath(), JSON.stringify(settings, null, 2), 'utf-8');
+async function writeSettingsToDisk(settings: AppSettings, winId?: number): Promise<AppSettings> {
+  await ensureStorageDirs(winId);
+  await fsp.writeFile(getSettingsPath(winId), JSON.stringify(settings, null, 2), 'utf-8');
   return settings;
+}
+
+async function generateProjectZipBytes(
+  songs: SongPackage[],
+  settings: AppSettings,
+  winId?: number,
+): Promise<Buffer> {
+  const zip = new JSZip();
+  const projectManifest = {
+    version: 1,
+    appName: 'Gifts Presenter',
+    exportedAt: new Date().toISOString(),
+    settings,
+    songs: [] as SongPackage[],
+  };
+
+  for (const song of songs) {
+    const bundledSong: SongPackage = { ...song, styleConfig: { ...song.styleConfig } };
+    try {
+      const audioFull = resolveSafeStoragePath(song.audioPath, winId);
+      const audioExt = path.extname(audioFull) || '.mp3';
+      const zipAudioPath = `songs/${song.id}/audio${audioExt}`;
+      const audioBuf = await fsp.readFile(audioFull);
+      zip.file(zipAudioPath, audioBuf);
+      bundledSong.audioPath = zipAudioPath;
+    } catch (err) {
+      console.warn(`Could not read audio for song ${song.id}:`, err);
+    }
+
+    if (
+      (song.styleConfig.backgroundType === 'image' || song.styleConfig.backgroundType === 'video') &&
+      song.styleConfig.backgroundSrc &&
+      !song.styleConfig.backgroundSrc.startsWith('http')
+    ) {
+      try {
+        const bgFull = resolveSafeStoragePath(song.styleConfig.backgroundSrc, winId);
+        const bgName = path.basename(bgFull);
+        const zipBgPath = `songs/${song.id}/assets/${bgName}`;
+        zip.file(zipBgPath, await fsp.readFile(bgFull));
+        bundledSong.styleConfig.backgroundSrc = zipBgPath;
+      } catch {}
+    }
+
+    if (song.styleConfig.fontAssetPath) {
+      try {
+        const fontFull = resolveSafeStoragePath(song.styleConfig.fontAssetPath, winId);
+        const fontName = path.basename(fontFull);
+        const zipFontPath = `songs/${song.id}/assets/${fontName}`;
+        zip.file(zipFontPath, await fsp.readFile(fontFull));
+        bundledSong.styleConfig.fontAssetPath = zipFontPath;
+      } catch {}
+    }
+
+    projectManifest.songs.push(bundledSong);
+  }
+
+  zip.file('project.json', JSON.stringify(projectManifest, null, 2));
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+
+async function importProjectZipFile(
+  zipFilePath: string,
+  winId?: number,
+): Promise<{ importedCount: number; songs: SongPackage[] }> {
+  await ensureStorageDirs(winId);
+  const bytes = await fsp.readFile(zipFilePath);
+  const zip = await JSZip.loadAsync(bytes);
+
+  const projectJsonFile = zip.file('project.json');
+  if (projectJsonFile) {
+    // Multi-song project archive (.gifts.zip)
+    const projectData = JSON.parse(await projectJsonFile.async('string'));
+    const importedSongs: SongPackage[] = [];
+    const songsDir = getSongsDir(winId);
+
+    for (const song of (projectData.songs || []) as SongPackage[]) {
+      const newId = `song-${randomUUID().slice(0, 8)}`;
+      const songDir = path.join(songsDir, newId);
+      await fsp.mkdir(path.join(songDir, 'assets'), { recursive: true });
+
+      const audioZipName = song.audioPath.replace(/\\/g, '/').replace(/^\/+/, '');
+      const audioEntry = zip.file(audioZipName);
+      let destAudioRel = song.audioPath;
+      if (audioEntry) {
+        const audioExt = path.extname(audioZipName) || '.mp3';
+        const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
+        destAudioRel = `${prefix}songs/${newId}/audio${audioExt}`;
+        await fsp.writeFile(resolveSafeStoragePath(destAudioRel, winId), await audioEntry.async('nodebuffer'));
+      }
+
+      const nextStyle = { ...DEFAULT_STYLE_CONFIG, ...song.styleConfig };
+      if (nextStyle.backgroundSrc && !nextStyle.backgroundSrc.startsWith('http')) {
+        const bgZipName = nextStyle.backgroundSrc.replace(/\\/g, '/').replace(/^\/+/, '');
+        const bgEntry = zip.file(bgZipName);
+        if (bgEntry) {
+          const bgName = path.basename(bgZipName);
+          const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
+          const destBgRel = `${prefix}songs/${newId}/assets/${bgName}`;
+          await fsp.writeFile(resolveSafeStoragePath(destBgRel, winId), await bgEntry.async('nodebuffer'));
+          nextStyle.backgroundSrc = destBgRel;
+        }
+      }
+
+      if (nextStyle.fontAssetPath) {
+        const fontZipName = nextStyle.fontAssetPath.replace(/\\/g, '/').replace(/^\/+/, '');
+        const fontEntry = zip.file(fontZipName);
+        if (fontEntry) {
+          const fontName = path.basename(fontZipName);
+          const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
+          const destFontRel = `${prefix}songs/${newId}/assets/${fontName}`;
+          await fsp.writeFile(resolveSafeStoragePath(destFontRel, winId), await fontEntry.async('nodebuffer'));
+          nextStyle.fontAssetPath = destFontRel;
+        }
+      }
+
+      const importedSong: SongPackage = {
+        ...song,
+        id: newId,
+        audioPath: destAudioRel,
+        styleConfig: nextStyle,
+        syncedLines: normalizeSyncedLines(song.syncedLines ?? [], song.duration),
+      };
+
+      await saveSongToDisk(importedSong, winId);
+      importedSongs.push(importedSong);
+    }
+
+    if (projectData.settings) {
+      await writeSettingsToDisk(projectData.settings, winId);
+    }
+
+    const allSongs = await listAllSongs(winId);
+    return { importedCount: importedSongs.length, songs: allSongs };
+  }
+
+  // Single song package (.satsang.zip)
+  const manifestFile = zip.file('manifest.json') ?? zip.file('song.json');
+  if (manifestFile) {
+    const manifest = JSON.parse(await manifestFile.async('string')) as SongPackage;
+    const newId = `song-${randomUUID().slice(0, 8)}`;
+    const songDir = path.join(getSongsDir(winId), newId);
+    await fsp.mkdir(path.join(songDir, 'assets'), { recursive: true });
+
+    const audioZipEntryName = manifest.audioPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const audioEntry = zip.file(audioZipEntryName);
+    if (!audioEntry) {
+      throw new Error(`Bundle missing audio entry: ${audioZipEntryName}`);
+    }
+    const audioExt = path.extname(audioZipEntryName) || '.mp3';
+    const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
+    const destAudioRel = `${prefix}songs/${newId}/audio${audioExt}`;
+    await fsp.writeFile(resolveSafeStoragePath(destAudioRel, winId), await audioEntry.async('nodebuffer'));
+
+    const nextStyle = { ...DEFAULT_STYLE_CONFIG, ...manifest.styleConfig };
+    if (
+      (nextStyle.backgroundType === 'image' || nextStyle.backgroundType === 'video') &&
+      nextStyle.backgroundSrc &&
+      !nextStyle.backgroundSrc.startsWith('http')
+    ) {
+      const bgEntryName = nextStyle.backgroundSrc.replace(/\\/g, '/').replace(/^\/+/, '');
+      const bgEntry = zip.file(bgEntryName);
+      if (bgEntry) {
+        const safeBgName = path.basename(bgEntryName);
+        const destBgRel = `${prefix}songs/${newId}/assets/${safeBgName}`;
+        await fsp.writeFile(resolveSafeStoragePath(destBgRel, winId), await bgEntry.async('nodebuffer'));
+        nextStyle.backgroundSrc = destBgRel;
+      }
+    }
+
+    if (nextStyle.fontAssetPath) {
+      const fontEntryName = nextStyle.fontAssetPath.replace(/\\/g, '/').replace(/^\/+/, '');
+      const fontEntry = zip.file(fontEntryName);
+      if (fontEntry) {
+        const safeFontName = path.basename(fontEntryName);
+        const destFontRel = `${prefix}songs/${newId}/assets/${safeFontName}`;
+        await fsp.writeFile(resolveSafeStoragePath(destFontRel, winId), await fontEntry.async('nodebuffer'));
+        nextStyle.fontAssetPath = destFontRel;
+      }
+    }
+
+    const importedSong: SongPackage = {
+      ...manifest,
+      id: newId,
+      audioPath: destAudioRel,
+      styleConfig: nextStyle,
+      syncedLines: normalizeSyncedLines(manifest.syncedLines ?? [], manifest.duration),
+    };
+
+    await saveSongToDisk(importedSong, winId);
+    const allSongs = await listAllSongs(winId);
+    return { importedCount: 1, songs: allSongs };
+  }
+
+  throw new Error('Invalid archive: neither project.json nor manifest.json found');
 }
 
 function sanitizeFileSlug(name: string): string {
@@ -588,6 +865,20 @@ function extractWordsFromGenericJson(data: unknown): AlignedWord[] {
   return [];
 }
 
+function showOpenDialogFor(
+  win: BrowserWindow | null | undefined,
+  options: Electron.OpenDialogOptions,
+): Promise<Electron.OpenDialogReturnValue> {
+  return win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options);
+}
+
+function showSaveDialogFor(
+  win: BrowserWindow | null | undefined,
+  options: Electron.SaveDialogOptions,
+): Promise<Electron.SaveDialogReturnValue> {
+  return win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options);
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('displays:getAll', () => getAllDisplayInfos());
 
@@ -618,15 +909,28 @@ function registerIpcHandlers(): void {
     }
   });
 
+  ipcMain.on('audio-visualizer-tick', (_event, payload: unknown) => {
+    if (outputWindow && !outputWindow.isDestroyed()) {
+      outputWindow.webContents.send('audio-visualizer-tick', payload);
+    }
+  });
+
   ipcMain.handle('presentation:getLatest', () => latestPresentationPayload);
 
-  ipcMain.handle('songs:list', () => listAllSongs());
-  ipcMain.handle('songs:reorder', async (_event, orderedIds: string[]) => reorderSongsOnDisk(orderedIds));
+  ipcMain.handle('songs:list', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return listAllSongs(win?.id);
+  });
+
+  ipcMain.handle('songs:reorder', async (event, orderedIds: string[]) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return reorderSongsOnDisk(orderedIds, win?.id);
+  });
 
   ipcMain.handle(
     'songs:create',
     async (
-      _event,
+      event,
       input: {
         title: string;
         audioSourcePath: string;
@@ -636,9 +940,11 @@ function registerIpcHandlers(): void {
         styleConfig?: SongPackage['styleConfig'];
       },
     ) => {
-      await ensureStorageDirs();
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const winId = win?.id;
+      await ensureStorageDirs(winId);
       const id = `song-${randomUUID().slice(0, 8)}`;
-      const songDir = path.join(getSongsDir(), id);
+      const songDir = path.join(getSongsDir(winId), id);
       await fsp.mkdir(songDir, { recursive: true });
 
       const ext = path.extname(input.audioSourcePath).toLowerCase() || '.mp3';
@@ -646,26 +952,32 @@ function registerIpcHandlers(): void {
       const audioDestPath = path.join(songDir, audioDestName);
       await fsp.copyFile(input.audioSourcePath, audioDestPath);
 
+      const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
       const song: SongPackage = {
         id,
         title: input.title.trim() || path.basename(input.audioSourcePath, ext),
-        audioPath: `songs/${id}/${audioDestName}`,
+        audioPath: `${prefix}songs/${id}/${audioDestName}`,
         duration: input.duration || 0,
         rawLyrics: input.rawLyrics ?? '',
         syncedLines: normalizeSyncedLines(input.syncedLines ?? [], input.duration || undefined),
         styleConfig: { ...DEFAULT_STYLE_CONFIG, ...(input.styleConfig ?? {}) },
         globalOffsetSeconds: 0,
       };
-      return saveSongToDisk(song);
+      return saveSongToDisk(song, winId);
     },
   );
 
-  ipcMain.handle('songs:save', (_event, song: SongPackage) => saveSongToDisk(song));
+  ipcMain.handle('songs:save', (event, song: SongPackage) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return saveSongToDisk(song, win?.id);
+  });
 
-  ipcMain.handle('songs:createDemo', async () => {
-    await ensureStorageDirs();
+  ipcMain.handle('songs:createDemo', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    await ensureStorageDirs(winId);
     const id = `song-demo-${randomUUID().slice(0, 6)}`;
-    const songDir = path.join(getSongsDir(), id);
+    const songDir = path.join(getSongsDir(winId), id);
     await fsp.mkdir(songDir, { recursive: true });
 
     // Synthesize deterministic 20s 22050Hz 16-bit mono WAV:
@@ -699,7 +1011,6 @@ function registerIpcHandlers(): void {
 
     for (let i = 0; i < totalSamples; i++) {
       const t = i / sampleRate;
-      // Gentle tanpura drone below 300Hz
       let sig = 0.12 * Math.sin(2 * Math.PI * 110 * t) + 0.08 * Math.sin(2 * Math.PI * 165 * t);
       for (const p of phrases) {
         if (t >= p.start && t <= p.end) {
@@ -714,8 +1025,9 @@ function registerIpcHandlers(): void {
       wav.writeInt16LE(Math.round(clamped * 32767), 44 + i * 2);
     }
 
-    const audioRel = `songs/${id}/audio.wav`;
-    await fsp.writeFile(resolveSafeStoragePath(audioRel), wav);
+    const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
+    const audioRel = `${prefix}songs/${id}/audio.wav`;
+    await fsp.writeFile(resolveSafeStoragePath(audioRel, winId), wav);
 
     const demoSong: SongPackage = {
       id,
@@ -734,16 +1046,20 @@ function registerIpcHandlers(): void {
       globalOffsetSeconds: 0,
     };
 
-    return saveSongToDisk(demoSong);
+    return saveSongToDisk(demoSong, winId);
   });
 
-  ipcMain.handle('songs:delete', async (_event, songId: string) => {
-    const safeDir = resolveSafeStoragePath(`songs/${songId}`);
+  ipcMain.handle('songs:delete', async (event, songId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    const prefix = winId && winId > 1 ? `windows/win-${winId}/songs/${songId}` : `songs/${songId}`;
+    const safeDir = resolveSafeStoragePath(prefix, winId);
     await fsp.rm(safeDir, { recursive: true, force: true });
   });
 
-  ipcMain.handle('songs:pickAudio', async () => {
-    const res = await dialog.showOpenDialog({
+  ipcMain.handle('songs:pickAudio', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const res = await showOpenDialogFor(win, {
       title: 'Select Satsang Audio Track',
       properties: ['openFile'],
       filters: [{ name: 'Audio Files', extensions: ['mp3', 'wav', 'flac', 'm4a'] }],
@@ -753,14 +1069,16 @@ function registerIpcHandlers(): void {
     return { filePath, fileName: path.basename(filePath) };
   });
 
-  ipcMain.handle('media:readBuffer', async (_event, relativePath: string) => {
-    const fullPath = resolveSafeStoragePath(relativePath);
+  ipcMain.handle('media:readBuffer', async (event, relativePath: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const fullPath = resolveSafeStoragePath(relativePath, win?.id);
     const buf = await fsp.readFile(fullPath);
     return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
   });
 
-  ipcMain.handle('lrc:importDialog', async () => {
-    const res = await dialog.showOpenDialog({
+  ipcMain.handle('lrc:importDialog', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const res = await showOpenDialogFor(win, {
       title: 'Import Standard .LRC Timecode File',
       properties: ['openFile'],
       filters: [{ name: 'LRC Lyric Timecodes', extensions: ['lrc', 'txt'] }],
@@ -771,8 +1089,9 @@ function registerIpcHandlers(): void {
     return { content, fileName: path.basename(filePath) };
   });
 
-  ipcMain.handle('lrc:exportDialog', async (_event, defaultName: string, content: string) => {
-    const res = await dialog.showSaveDialog({
+  ipcMain.handle('lrc:exportDialog', async (event, defaultName: string, content: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const res = await showSaveDialogFor(win, {
       title: 'Export Standard .LRC File',
       defaultPath: `${sanitizeFileSlug(defaultName)}.lrc`,
       filters: [{ name: 'LRC Lyric Timecodes', extensions: ['lrc'] }],
@@ -785,14 +1104,15 @@ function registerIpcHandlers(): void {
   ipcMain.handle(
     'lyrics:exportFileDialog',
     async (
-      _event,
+      event,
       defaultName: string,
       content: string,
       extension: string,
       filterName: string,
     ) => {
+      const win = BrowserWindow.fromWebContents(event.sender);
       const ext = extension.replace(/^\.+/, '');
-      const res = await dialog.showSaveDialog({
+      const res = await showSaveDialogFor(win, {
         title: `Export ${filterName}`,
         defaultPath: `${sanitizeFileSlug(defaultName)}.${ext}`,
         filters: [{ name: filterName, extensions: [ext] }],
@@ -803,13 +1123,16 @@ function registerIpcHandlers(): void {
     },
   );
 
-  ipcMain.handle('bundle:export', async (_event, songId: string) => {
-    const songDir = resolveSafeStoragePath(`songs/${songId}`);
+  ipcMain.handle('bundle:export', async (event, songId: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    const prefix = winId && winId > 1 ? `windows/win-${winId}/songs/${songId}` : `songs/${songId}`;
+    const songDir = resolveSafeStoragePath(prefix, winId);
     const songJsonPath = path.join(songDir, 'song.json');
     const raw = await fsp.readFile(songJsonPath, 'utf-8');
     const song = JSON.parse(raw) as SongPackage;
 
-    const saveRes = await dialog.showSaveDialog({
+    const saveRes = await showSaveDialogFor(win, {
       title: 'Export Portable .satsang.zip Bundle',
       defaultPath: `${sanitizeFileSlug(song.title)}.satsang.zip`,
       filters: [{ name: 'Satsang Song Bundle', extensions: ['satsang.zip', 'zip'] }],
@@ -819,7 +1142,7 @@ function registerIpcHandlers(): void {
     }
 
     const zip = new JSZip();
-    const audioFullPath = resolveSafeStoragePath(song.audioPath);
+    const audioFullPath = resolveSafeStoragePath(song.audioPath, winId);
     const audioBaseName = path.basename(audioFullPath);
     const audioBuf = await fsp.readFile(audioFullPath);
     zip.file(`audio/${audioBaseName}`, audioBuf);
@@ -836,7 +1159,7 @@ function registerIpcHandlers(): void {
       !song.styleConfig.backgroundSrc.startsWith('http')
     ) {
       try {
-        const bgFull = resolveSafeStoragePath(song.styleConfig.backgroundSrc);
+        const bgFull = resolveSafeStoragePath(song.styleConfig.backgroundSrc, winId);
         const bgName = path.basename(bgFull);
         zip.file(`assets/${bgName}`, await fsp.readFile(bgFull));
         bundledSong.styleConfig.backgroundSrc = `assets/${bgName}`;
@@ -847,7 +1170,7 @@ function registerIpcHandlers(): void {
 
     if (song.styleConfig.fontAssetPath) {
       try {
-        const fontFull = resolveSafeStoragePath(song.styleConfig.fontAssetPath);
+        const fontFull = resolveSafeStoragePath(song.styleConfig.fontAssetPath, winId);
         const fontName = path.basename(fontFull);
         zip.file(`assets/${fontName}`, await fsp.readFile(fontFull));
         bundledSong.styleConfig.fontAssetPath = `assets/${fontName}`;
@@ -862,78 +1185,55 @@ function registerIpcHandlers(): void {
     return { canceled: false, filePath: saveRes.filePath };
   });
 
-  ipcMain.handle('bundle:import', async () => {
-    const res = await dialog.showOpenDialog({
+  ipcMain.handle('bundle:import', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    const res = await showOpenDialogFor(win, {
       title: 'Import Portable .satsang.zip Bundle',
       properties: ['openFile'],
-      filters: [{ name: 'Satsang Song Bundle', extensions: ['zip'] }],
+      filters: [{ name: 'Satsang Song Bundle', extensions: ['zip', 'satsang.zip'] }],
     });
     if (res.canceled || res.filePaths.length === 0) return null;
-
-    const bytes = await fsp.readFile(res.filePaths[0]);
-    const zip = await JSZip.loadAsync(bytes);
-    const manifestFile = zip.file('manifest.json') ?? zip.file('song.json');
-    if (!manifestFile) {
-      throw new Error('Invalid .satsang.zip bundle: missing manifest.json');
-    }
-
-    const manifest = JSON.parse(await manifestFile.async('string')) as SongPackage;
-    const newId = `song-${randomUUID().slice(0, 8)}`;
-    const songDir = path.join(getSongsDir(), newId);
-    await fsp.mkdir(path.join(songDir, 'assets'), { recursive: true });
-
-    const audioZipEntryName = manifest.audioPath.replace(/\\/g, '/').replace(/^\/+/, '');
-    const audioEntry = zip.file(audioZipEntryName);
-    if (!audioEntry) {
-      throw new Error(`Bundle missing audio entry: ${audioZipEntryName}`);
-    }
-    const audioExt = path.extname(audioZipEntryName) || '.mp3';
-    const destAudioRel = `songs/${newId}/audio${audioExt}`;
-    await fsp.writeFile(resolveSafeStoragePath(destAudioRel), await audioEntry.async('nodebuffer'));
-
-    const nextStyle = { ...DEFAULT_STYLE_CONFIG, ...manifest.styleConfig };
-
-    if (
-      (nextStyle.backgroundType === 'image' || nextStyle.backgroundType === 'video') &&
-      nextStyle.backgroundSrc
-    ) {
-      const bgEntryName = nextStyle.backgroundSrc.replace(/\\/g, '/').replace(/^\/+/, '');
-      const bgEntry = zip.file(bgEntryName);
-      if (bgEntry) {
-        const safeBgName = path.basename(bgEntryName);
-        const destBgRel = `songs/${newId}/assets/${safeBgName}`;
-        await fsp.writeFile(resolveSafeStoragePath(destBgRel), await bgEntry.async('nodebuffer'));
-        nextStyle.backgroundSrc = destBgRel;
-      }
-    }
-
-    if (nextStyle.fontAssetPath) {
-      const fontEntryName = nextStyle.fontAssetPath.replace(/\\/g, '/').replace(/^\/+/, '');
-      const fontEntry = zip.file(fontEntryName);
-      if (fontEntry) {
-        const safeFontName = path.basename(fontEntryName);
-        const destFontRel = `songs/${newId}/assets/${safeFontName}`;
-        await fsp.writeFile(resolveSafeStoragePath(destFontRel), await fontEntry.async('nodebuffer'));
-        nextStyle.fontAssetPath = destFontRel;
-      }
-    }
-
-    const importedSong: SongPackage = {
-      ...manifest,
-      id: newId,
-      audioPath: destAudioRel,
-      styleConfig: nextStyle,
-      syncedLines: normalizeSyncedLines(manifest.syncedLines ?? [], manifest.duration),
-    };
-
-    return saveSongToDisk(importedSong);
+    const result = await importProjectZipFile(res.filePaths[0], winId);
+    return result.songs[result.songs.length - 1] ?? null;
   });
 
-  ipcMain.handle('project:export', async () => {
-    const songs = await listAllSongs();
-    const settings = await readSettingsFromDisk();
+  ipcMain.handle('bundle:loadDemo', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    const candidatePaths = [
+      path.join(app.getAppPath(), 'demo-project', 'Gifts-Demo-Bhajan.zip'),
+      path.join(app.getAppPath(), 'demo-project', 'Gifts_Project_Demo_Project.gifts.zip'),
+      path.join(process.resourcesPath, 'demo-project', 'Gifts-Demo-Bhajan.zip'),
+      path.join(process.resourcesPath, 'demo-project', 'Gifts_Project_Demo_Project.gifts.zip'),
+      path.join(__dirname, '..', 'demo-project', 'Gifts-Demo-Bhajan.zip'),
+      path.join(process.cwd(), 'demo-project', 'Gifts-Demo-Bhajan.zip'),
+      path.join(app.getPath('downloads'), 'Gifts_Project_Demo_Project.gifts.zip'),
+      'C:\\Users\\User\\Downloads\\Gifts_Project_Demo_Project.gifts.zip',
+      path.join(app.getPath('downloads'), 'Gifts_Project 2 bhajans.gifts.zip'),
+      'C:\\Users\\User\\Downloads\\Gifts_Project 2 bhajans.gifts.zip',
+    ];
+    let demoPath: string | null = null;
+    for (const p of candidatePaths) {
+      if (fs.existsSync(p)) {
+        demoPath = p;
+        break;
+      }
+    }
+    if (!demoPath) {
+      throw new Error('Demo project package (Gifts-Demo-Bhajan.zip) not found.');
+    }
+    const result = await importProjectZipFile(demoPath, winId);
+    return result.songs[result.songs.length - 1] ?? null;
+  });
 
-    const saveRes = await dialog.showSaveDialog({
+  ipcMain.handle('project:export', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    const songs = await listAllSongs(winId);
+    const settings = await readSettingsFromDisk(winId);
+
+    const saveRes = await showSaveDialogFor(win, {
       title: 'Export Full Gifts Presenter Project Backup',
       defaultPath: `Gifts_Project_${new Date().toISOString().slice(0, 10)}.gifts.zip`,
       filters: [{ name: 'Gifts Presenter Project (.gifts.zip)', extensions: ['gifts.zip', 'zip'] }],
@@ -942,161 +1242,103 @@ function registerIpcHandlers(): void {
       return { canceled: true };
     }
 
-    const zip = new JSZip();
-    const projectManifest = {
-      version: 1,
-      appName: 'Gifts Presenter',
-      exportedAt: new Date().toISOString(),
-      settings,
-      songs: [] as SongPackage[],
-    };
-
-    for (const song of songs) {
-      const bundledSong: SongPackage = { ...song, styleConfig: { ...song.styleConfig } };
-      try {
-        const audioFull = resolveSafeStoragePath(song.audioPath);
-        const audioExt = path.extname(audioFull) || '.mp3';
-        const zipAudioPath = `songs/${song.id}/audio${audioExt}`;
-        const audioBuf = await fsp.readFile(audioFull);
-        zip.file(zipAudioPath, audioBuf);
-        bundledSong.audioPath = zipAudioPath;
-      } catch (err) {
-        console.warn(`Could not read audio for song ${song.id}:`, err);
-      }
-
-      if (
-        (song.styleConfig.backgroundType === 'image' || song.styleConfig.backgroundType === 'video') &&
-        song.styleConfig.backgroundSrc &&
-        !song.styleConfig.backgroundSrc.startsWith('http')
-      ) {
-        try {
-          const bgFull = resolveSafeStoragePath(song.styleConfig.backgroundSrc);
-          const bgName = path.basename(bgFull);
-          const zipBgPath = `songs/${song.id}/assets/${bgName}`;
-          zip.file(zipBgPath, await fsp.readFile(bgFull));
-          bundledSong.styleConfig.backgroundSrc = zipBgPath;
-        } catch {}
-      }
-
-      if (song.styleConfig.fontAssetPath) {
-        try {
-          const fontFull = resolveSafeStoragePath(song.styleConfig.fontAssetPath);
-          const fontName = path.basename(fontFull);
-          const zipFontPath = `songs/${song.id}/assets/${fontName}`;
-          zip.file(zipFontPath, await fsp.readFile(fontFull));
-          bundledSong.styleConfig.fontAssetPath = zipFontPath;
-        } catch {}
-      }
-
-      projectManifest.songs.push(bundledSong);
-    }
-
-    zip.file('project.json', JSON.stringify(projectManifest, null, 2));
-    const zipBytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    const zipBytes = await generateProjectZipBytes(songs, settings, winId);
     await fsp.writeFile(saveRes.filePath, zipBytes);
     return { canceled: false, filePath: saveRes.filePath, songCount: songs.length };
   });
 
-  ipcMain.handle('project:import', async () => {
-    const res = await dialog.showOpenDialog({
-      title: 'Import Full Gifts Presenter Project Backup',
-      properties: ['openFile'],
-      filters: [{ name: 'Gifts Presenter Project (.gifts.zip)', extensions: ['gifts.zip', 'zip'] }],
-    });
-    if (res.canceled || res.filePaths.length === 0) return null;
-
-    const bytes = await fsp.readFile(res.filePaths[0]);
-    const zip = await JSZip.loadAsync(bytes);
-    const projectJsonFile = zip.file('project.json');
-    if (!projectJsonFile) {
-      throw new Error('Invalid project file: missing project.json manifest');
+  ipcMain.handle('project:import', async (event, explicitFilePath?: string) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    let targetPath = explicitFilePath;
+    if (!targetPath) {
+      const res = await showOpenDialogFor(win, {
+        title: 'Import Full Gifts Presenter Project Backup',
+        properties: ['openFile'],
+        filters: [{ name: 'Gifts & Satsang Archives (.gifts.zip, .satsang.zip, .zip)', extensions: ['gifts.zip', 'satsang.zip', 'zip'] }],
+      });
+      if (res.canceled || res.filePaths.length === 0) return null;
+      targetPath = res.filePaths[0];
     }
-
-    const projectData = JSON.parse(await projectJsonFile.async('string'));
-    const importedSongs: SongPackage[] = [];
-
-    for (const song of projectData.songs || []) {
-      const newId = song.id || `song-${randomUUID().slice(0, 8)}`;
-      const songDir = path.join(getSongsDir(), newId);
-      await fsp.mkdir(path.join(songDir, 'assets'), { recursive: true });
-
-      const audioZipName = song.audioPath.replace(/\\/g, '/').replace(/^\/+/, '');
-      const audioEntry = zip.file(audioZipName);
-      let destAudioRel = song.audioPath;
-      if (audioEntry) {
-        const audioExt = path.extname(audioZipName) || '.mp3';
-        destAudioRel = `songs/${newId}/audio${audioExt}`;
-        await fsp.writeFile(resolveSafeStoragePath(destAudioRel), await audioEntry.async('nodebuffer'));
-      }
-
-      const nextStyle = { ...DEFAULT_STYLE_CONFIG, ...song.styleConfig };
-      if (nextStyle.backgroundSrc && !nextStyle.backgroundSrc.startsWith('http')) {
-        const bgZipName = nextStyle.backgroundSrc.replace(/\\/g, '/').replace(/^\/+/, '');
-        const bgEntry = zip.file(bgZipName);
-        if (bgEntry) {
-          const bgName = path.basename(bgZipName);
-          const destBgRel = `songs/${newId}/assets/${bgName}`;
-          await fsp.writeFile(resolveSafeStoragePath(destBgRel), await bgEntry.async('nodebuffer'));
-          nextStyle.backgroundSrc = destBgRel;
-        }
-      }
-
-      if (nextStyle.fontAssetPath) {
-        const fontZipName = nextStyle.fontAssetPath.replace(/\\/g, '/').replace(/^\/+/, '');
-        const fontEntry = zip.file(fontZipName);
-        if (fontEntry) {
-          const fontName = path.basename(fontZipName);
-          const destFontRel = `songs/${newId}/assets/${fontName}`;
-          await fsp.writeFile(resolveSafeStoragePath(destFontRel), await fontEntry.async('nodebuffer'));
-          nextStyle.fontAssetPath = destFontRel;
-        }
-      }
-
-      const importedSong: SongPackage = {
-        ...song,
-        id: newId,
-        audioPath: destAudioRel,
-        styleConfig: nextStyle,
-        syncedLines: normalizeSyncedLines(song.syncedLines ?? [], song.duration),
-      };
-
-      await saveSongToDisk(importedSong);
-      importedSongs.push(importedSong);
-    }
-
-    if (projectData.settings) {
-      await writeSettingsToDisk(projectData.settings);
-    }
-
-    return { importedCount: importedSongs.length, songs: await listAllSongs() };
+    return importProjectZipFile(targetPath, winId);
   });
 
-  ipcMain.handle('assets:list', async () => {
-    await ensureStorageDirs();
+  ipcMain.handle('project:new', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    const songsDir = getSongsDir(winId);
+    await fsp.rm(songsDir, { recursive: true, force: true });
+    await ensureStorageDirs(winId);
+    return true;
+  });
+
+  ipcMain.handle('dialog:pickZip', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const res = await showOpenDialogFor(win, {
+      title: 'Select Project or Song Archive (.zip)',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Gifts & Satsang Archives (.gifts.zip, .satsang.zip, .zip)', extensions: ['gifts.zip', 'satsang.zip', 'zip'] },
+        { name: 'All Files', extensions: ['*'] },
+      ],
+    });
+    if (res.canceled || res.filePaths.length === 0) return null;
+    const filePath = res.filePaths[0];
+    return { filePath, fileName: path.basename(filePath) };
+  });
+
+  ipcMain.handle('window:openNew', async (_event, params?: { initialZipPath?: string; isNewProject?: boolean }) => {
+    createMainWindow(params);
+    return true;
+  });
+
+  ipcMain.handle('window:getInitialData', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return null;
+    const data = initialDataByWindowId.get(win.id) ?? null;
+    initialDataByWindowId.delete(win.id);
+    return data;
+  });
+
+  ipcMain.handle('window:confirmClose', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win && !win.isDestroyed()) {
+      closingAllowedWindows.add(win.id);
+      win.close();
+    }
+    return true;
+  });
+
+  ipcMain.handle('assets:list', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    await ensureStorageDirs(winId);
     const assets: MediaAsset[] = [];
 
-    const bgFiles = await fsp.readdir(getBackgroundsDir(), { withFileTypes: true });
+    const bgFiles = await fsp.readdir(getBackgroundsDir(winId), { withFileTypes: true }).catch(() => []);
     for (const f of bgFiles) {
       if (!f.isFile()) continue;
       const ext = path.extname(f.name).toLowerCase();
       const kind = ['.mp4', '.webm', '.mov'].includes(ext) ? 'video' : 'image';
+      const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
       assets.push({
         id: `bg-${f.name}`,
         name: f.name,
         kind,
-        relativePath: `assets/backgrounds/${f.name}`,
+        relativePath: `${prefix}assets/backgrounds/${f.name}`,
       });
     }
 
-    const fontFiles = await fsp.readdir(getFontsDir(), { withFileTypes: true });
+    const fontFiles = await fsp.readdir(getFontsDir(winId), { withFileTypes: true }).catch(() => []);
     for (const f of fontFiles) {
       if (!f.isFile()) continue;
       const base = path.basename(f.name, path.extname(f.name));
+      const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
       assets.push({
         id: `font-${f.name}`,
         name: f.name,
         kind: 'font',
-        relativePath: `assets/fonts/${f.name}`,
+        relativePath: `${prefix}assets/fonts/${f.name}`,
         fontFamily: `SatsangFont_${sanitizeFileSlug(base)}`,
       });
     }
@@ -1104,9 +1346,11 @@ function registerIpcHandlers(): void {
     return assets;
   });
 
-  ipcMain.handle('assets:importBackground', async () => {
-    await ensureStorageDirs();
-    const res = await dialog.showOpenDialog({
+  ipcMain.handle('assets:importBackground', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    await ensureStorageDirs(winId);
+    const res = await showOpenDialogFor(win, {
       title: 'Import Background Image or Looping Video',
       properties: ['openFile'],
       filters: [
@@ -1117,20 +1361,23 @@ function registerIpcHandlers(): void {
     const src = res.filePaths[0];
     const ext = path.extname(src).toLowerCase();
     const safeName = `${sanitizeFileSlug(path.basename(src, ext))}_${Date.now().toString(36)}${ext}`;
-    const dest = path.join(getBackgroundsDir(), safeName);
+    const dest = path.join(getBackgroundsDir(winId), safeName);
     await fsp.copyFile(src, dest);
     const kind = ['.mp4', '.webm', '.mov'].includes(ext) ? 'video' : 'image';
+    const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
     return {
       id: `bg-${safeName}`,
       name: safeName,
       kind,
-      relativePath: `assets/backgrounds/${safeName}`,
+      relativePath: `${prefix}assets/backgrounds/${safeName}`,
     } satisfies MediaAsset;
   });
 
-  ipcMain.handle('assets:importFont', async () => {
-    await ensureStorageDirs();
-    const res = await dialog.showOpenDialog({
+  ipcMain.handle('assets:importFont', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const winId = win?.id;
+    await ensureStorageDirs(winId);
+    const res = await showOpenDialogFor(win, {
       title: 'Import Custom Stage Font (.ttf / .otf)',
       properties: ['openFile'],
       filters: [{ name: 'Fonts', extensions: ['ttf', 'otf'] }],
@@ -1140,24 +1387,27 @@ function registerIpcHandlers(): void {
     const ext = path.extname(src).toLowerCase();
     const baseSlug = sanitizeFileSlug(path.basename(src, ext));
     const safeName = `${baseSlug}_${Date.now().toString(36)}${ext}`;
-    const dest = path.join(getFontsDir(), safeName);
+    const dest = path.join(getFontsDir(winId), safeName);
     await fsp.copyFile(src, dest);
     const fontFamily = `SatsangFont_${baseSlug}`;
+    const prefix = winId && winId > 1 ? `windows/win-${winId}/` : '';
     return {
       id: `font-${safeName}`,
       name: safeName,
       kind: 'font',
-      relativePath: `assets/fonts/${safeName}`,
+      relativePath: `${prefix}assets/fonts/${safeName}`,
       fontFamily,
     } satisfies MediaAsset;
   });
 
-  ipcMain.handle('settings:get', async () => {
-    return readSettingsFromDisk();
+  ipcMain.handle('settings:get', async (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return readSettingsFromDisk(win?.id);
   });
 
-  ipcMain.handle('settings:save', async (_event, settings: AppSettings) => {
-    return writeSettingsToDisk(settings);
+  ipcMain.handle('settings:save', async (event, settings: AppSettings) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return writeSettingsToDisk(settings, win?.id);
   });
 
   ipcMain.handle(
@@ -1239,208 +1489,6 @@ function registerIpcHandlers(): void {
         return words;
       } finally {
         await fsp.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
-      }
-    },
-  );
-
-  ipcMain.handle(
-    'align:gemini',
-    async (
-      _event,
-      params: {
-        audioRelativePath: string;
-        rawLyrics: string;
-        durationSec: number;
-        apiKey: string;
-        model: GeminiAlignModel;
-      },
-    ): Promise<GeminiAlignedLine[]> => {
-      const apiKey = params.apiKey.trim();
-      if (!apiKey) {
-        throw new Error('Gemini API key is required for Gemini Audio Alignment.');
-      }
-
-      const lines = splitRawLyrics(params.rawLyrics);
-      if (lines.length === 0) {
-        throw new Error('No lyric lines provided to align.');
-      }
-
-      const audioFullPath = resolveSafeStoragePath(params.audioRelativePath);
-      const audioBytes = await fsp.readFile(audioFullPath);
-      const mimeType = getMimeType(audioFullPath);
-      const model = normalizeGeminiModel(params.model);
-
-      const numberedLyrics = lines.map((line, i) => `[${i}] ${line}`).join('\n');
-      const durationInfo =
-        params.durationSec > 0
-          ? `Total audio duration is ${params.durationSec.toFixed(2)} seconds.`
-          : '';
-
-      const promptText = [
-        'You are a precision audio-to-lyric timecode aligner for live Satsang music presentations.',
-        durationInfo,
-        `There are ${lines.length} lyric lines numbered [0] through [${lines.length - 1}].`,
-        'Listen carefully to the vocal singing/chanting in the audio from start to finish.',
-        'For EVERY line index from 0 to ' + (lines.length - 1) + ':',
-        '- startSec: exact timestamp in decimal seconds (e.g. 14.32) when the vocalist begins singing the first syllable of that line.',
-        '- endSec: exact timestamp in decimal seconds when the vocalist finishes singing the last syllable of that line.',
-        'Ignore instrumental intros, solo alaaps without lyrics, and harmonium/tabla interludes between verses.',
-        'Ensure timestamps are strictly chronological (startSec[i] <= endSec[i], and startSec[i+1] >= startSec[i]).',
-        'Return every index 0..' + (lines.length - 1) + ' in the JSON alignments array.',
-        '',
-        'LYRICS:',
-        numberedLyrics,
-      ].join('\n');
-
-      let uploadedFileName: string | null = null;
-      try {
-        let audioPart: Record<string, unknown>;
-
-        if (audioBytes.byteLength <= 12 * 1024 * 1024) {
-          audioPart = {
-            inlineData: {
-              mimeType,
-              data: audioBytes.toString('base64'),
-            },
-          };
-        } else {
-          // Resumable upload via Gemini Files API for large WAV / FLAC tracks
-          const startUploadRes = await fetch(
-            `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
-            {
-              method: 'POST',
-              headers: {
-                'X-Goog-Upload-Protocol': 'resumable',
-                'X-Goog-Upload-Command': 'start',
-                'X-Goog-Upload-Header-Content-Length': String(audioBytes.byteLength),
-                'X-Goog-Upload-Header-Content-Type': mimeType,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                file: { display_name: path.basename(audioFullPath) },
-              }),
-            },
-          );
-          if (!startUploadRes.ok) {
-            throw new Error(`Gemini File Upload init failed (${startUploadRes.status}): ${await startUploadRes.text()}`);
-          }
-          const uploadUrl = startUploadRes.headers.get('x-goog-upload-url');
-          if (!uploadUrl) {
-            throw new Error('Gemini File Upload did not return x-goog-upload-url.');
-          }
-
-          const uploadRes = await fetch(uploadUrl, {
-            method: 'PUT',
-            headers: {
-              'Content-Length': String(audioBytes.byteLength),
-              'X-Goog-Upload-Offset': '0',
-              'X-Goog-Upload-Command': 'upload, finalize',
-            },
-            body: audioBytes,
-          });
-          if (!uploadRes.ok) {
-            throw new Error(`Gemini File Upload failed (${uploadRes.status}): ${await uploadRes.text()}`);
-          }
-          const uploadJson = (await uploadRes.json()) as {
-            file?: { name?: string; uri?: string; state?: string; mimeType?: string };
-          };
-          const fileMeta = uploadJson.file;
-          if (!fileMeta?.uri || !fileMeta?.name) {
-            throw new Error('Gemini File Upload returned invalid file metadata.');
-          }
-          uploadedFileName = fileMeta.name;
-
-          // Poll until ACTIVE
-          let state = fileMeta.state ?? 'PROCESSING';
-          for (let attempt = 0; attempt < 30 && state === 'PROCESSING'; attempt++) {
-            await new Promise((r) => setTimeout(r, 1000));
-            const statusRes = await fetch(
-              `https://generativelanguage.googleapis.com/v1beta/${uploadedFileName}?key=${encodeURIComponent(apiKey)}`,
-            );
-            if (statusRes.ok) {
-              const statusJson = (await statusRes.json()) as { state?: string };
-              state = statusJson.state ?? state;
-            }
-          }
-          if (state !== 'ACTIVE') {
-            throw new Error(`Gemini uploaded audio did not become ACTIVE (state=${state}).`);
-          }
-
-          audioPart = {
-            fileData: {
-              mimeType: fileMeta.mimeType || mimeType,
-              fileUri: fileMeta.uri,
-            },
-          };
-        }
-
-        const genRes = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [
-                {
-                  role: 'user',
-                  parts: [audioPart, { text: promptText }],
-                },
-              ],
-              generationConfig: {
-                temperature: 0,
-                responseMimeType: 'application/json',
-                responseSchema: {
-                  type: 'OBJECT',
-                  properties: {
-                    alignments: {
-                      type: 'ARRAY',
-                      items: {
-                        type: 'OBJECT',
-                        properties: {
-                          index: { type: 'INTEGER' },
-                          startSec: { type: 'NUMBER' },
-                          endSec: { type: 'NUMBER' },
-                        },
-                        required: ['index', 'startSec', 'endSec'],
-                      },
-                    },
-                  },
-                  required: ['alignments'],
-                },
-              },
-            }),
-          },
-        );
-
-        if (!genRes.ok) {
-          const errText = await genRes.text().catch(() => '');
-          throw new Error(`Gemini API error (${genRes.status}): ${errText}`);
-        }
-
-        const genJson = (await genRes.json()) as {
-          candidates?: Array<{
-            content?: { parts?: Array<{ text?: string }> };
-          }>;
-        };
-
-        const rawText = genJson.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (!rawText) {
-          throw new Error('Gemini API returned empty alignment response.');
-        }
-
-        const parsed = JSON.parse(rawText) as { alignments?: GeminiAlignedLine[] };
-        if (!Array.isArray(parsed.alignments) || parsed.alignments.length === 0) {
-          throw new Error('Gemini API returned no alignment entries.');
-        }
-
-        return parsed.alignments;
-      } finally {
-        if (uploadedFileName) {
-          fetch(
-            `https://generativelanguage.googleapis.com/v1beta/${uploadedFileName}?key=${encodeURIComponent(apiKey)}`,
-            { method: 'DELETE' },
-          ).catch(() => {});
-        }
       }
     },
   );

@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertCircle,
+  BookOpen,
   CheckCircle2,
   ChevronDown,
   FolderArchive,
   FolderDown,
+  FolderPlus,
   Monitor,
   Presentation,
   Settings,
@@ -19,8 +21,15 @@ import { getUiZoom, subscribeUiZoom, zoomUiIn, zoomUiOut, zoomUiReset } from './
 import { LibrarySidebar } from './components/LibrarySidebar';
 import { NewSongModal } from './components/NewSongModal';
 import { SettingsModal } from './components/SettingsModal';
+import {
+  CloseWindowConfirmModal,
+  ImportDestinationModal,
+  NewProjectConfirmModal,
+} from './components/ProjectModals';
+import { PresentationGuideModal } from './components/PresentationGuideModal';
 import { StagePresenter } from './components/StagePresenter';
 import { SyncStudio } from './components/SyncStudio';
+import appLogo from './assets/logo.webp';
 
 export const App: React.FC = () => {
   const initialize = usePresenterStore((s) => s.initialize);
@@ -40,9 +49,15 @@ export const App: React.FC = () => {
   const showToast = usePresenterStore((s) => s.showToast);
   const exportProject = usePresenterStore((s) => s.exportProject);
   const importProject = usePresenterStore((s) => s.importProject);
+  const importBundle = usePresenterStore((s) => s.importBundle);
+  const loadDemoSong = usePresenterStore((s) => s.loadDemoSong);
+  const newProject = usePresenterStore((s) => s.newProject);
+  const setNewProjectModalOpen = usePresenterStore((s) => s.setNewProjectModalOpen);
+  const importProjectFromPath = usePresenterStore((s) => s.importProjectFromPath);
 
   const [newSongOpen, setNewSongOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [guideModalOpen, setGuideModalOpen] = useState(false);
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
   const [uiScale, setUiScale] = useState(getUiZoom);
 
@@ -54,11 +69,19 @@ export const App: React.FC = () => {
     let cleanup: (() => void) | undefined;
     initialize().then((fn) => {
       cleanup = fn;
+      // Check for window initial data (e.g. from open in new window or initial zip)
+      window.satsangAPI?.getInitialWindowData?.().then(async (initData) => {
+        if (initData?.initialZipPath) {
+          await importProjectFromPath(initData.initialZipPath);
+        } else if (initData?.isNewProject) {
+          await newProject();
+        }
+      });
     });
     return () => {
       cleanup?.();
     };
-  }, [initialize]);
+  }, [initialize, importProjectFromPath, newProject]);
 
   // Global Whole UI Zoom Hotkeys (Ctrl + +, Ctrl + -, Ctrl + 0)
   useEffect(() => {
@@ -150,35 +173,66 @@ export const App: React.FC = () => {
     }
   };
 
+  const isMac = useMemo(
+    () => typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/i.test(navigator.userAgent),
+    [],
+  );
+
+  const handleGuideNavigate = (
+    dest: 'new-song' | 'studio' | 'stage' | 'settings' | 'load-demo' | 'import-bundle',
+  ) => {
+    setGuideModalOpen(false);
+    switch (dest) {
+      case 'new-song':
+        setNewSongOpen(true);
+        break;
+      case 'studio':
+        setMode('studio');
+        break;
+      case 'stage':
+        setMode('stage');
+        break;
+      case 'settings':
+        setSettingsOpen(true);
+        break;
+      case 'load-demo':
+        loadDemoSong();
+        break;
+      case 'import-bundle':
+        importBundle();
+        break;
+    }
+  };
+
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-stage-bg text-slate-100 select-none">
-      {/* Top Master Stage Header (with Windows window controls safe margin) */}
+      {/* Top Master Stage Header (with macOS traffic lights & Windows caption safe margins) */}
       <header
-        className="flex h-14 shrink-0 items-center justify-between border-b border-stage-border bg-[#0b0d13] px-4 pr-36 select-none"
+        className={`flex h-11 shrink-0 items-center justify-between border-b border-stage-border bg-[#0b0d13] ${
+          isMac ? 'pl-20 pr-3' : 'px-3 pr-36'
+        } select-none`}
         style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
       >
-        <div className="flex items-center gap-4" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
-          <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+          <div className="flex items-center gap-2">
             <img
-              src="/logo.webp"
+              src={appLogo}
               alt="Gifts Presenter Logo"
-              className="h-8 w-8 rounded-xl object-cover border border-amber-500/40 shadow-sm shrink-0"
+              className="h-6 w-6 rounded-lg object-cover border border-amber-500/40 shadow-sm shrink-0"
             />
-            <div>
-              <div className="text-sm font-bold tracking-wide text-white leading-none">
-                GIFTS PRESENTER
-              </div>
+            <div className="text-xs font-bold tracking-wider text-white leading-none">
+              GIFTS PRESENTER
             </div>
           </div>
 
-          <div className="h-6 w-px bg-stage-border mx-1" />
+          <div className="h-4 w-px bg-stage-border mx-0.5" />
 
           {/* Module Switcher */}
-          <nav className="flex items-center rounded-xl border border-stage-border bg-stage-bg p-1">
+          <nav className="flex items-center rounded-lg border border-stage-border bg-stage-bg p-0.5">
             <button
               type="button"
               onClick={() => setMode('studio')}
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
                 mode === 'studio'
                   ? 'bg-stage-card text-amber-300 shadow'
                   : 'text-slate-400 hover:text-white'
@@ -190,7 +244,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setMode('stage')}
-              className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-semibold transition-colors ${
                 mode === 'stage'
                   ? 'bg-stage-card text-amber-300 shadow'
                   : 'text-slate-400 hover:text-white'
@@ -206,7 +260,7 @@ export const App: React.FC = () => {
             <button
               type="button"
               onClick={() => setProjectMenuOpen(!projectMenuOpen)}
-              className="flex items-center gap-1.5 rounded-xl border border-stage-border bg-stage-card px-2.5 py-1.5 text-xs font-semibold text-slate-300 hover:border-amber-500/50 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 rounded-lg border border-stage-border bg-stage-card px-2.5 py-1 text-xs font-medium text-slate-300 hover:border-amber-500/50 hover:text-white transition-colors"
             >
               <FolderArchive className="h-3.5 w-3.5 text-amber-400" />
               <span>Project</span>
@@ -218,7 +272,31 @@ export const App: React.FC = () => {
                 className="absolute left-0 mt-2 w-72 rounded-2xl border border-stage-border bg-stage-panel p-2 shadow-2xl z-50 space-y-1"
               >
                 <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                  Project Backup & Restore
+                  Project Workspace
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectMenuOpen(false);
+                    if (songs.length === 0) {
+                      newProject();
+                    } else {
+                      setNewProjectModalOpen(true);
+                    }
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-200 hover:bg-white/10 transition-colors"
+                >
+                  <FolderPlus className="h-4 w-4 text-emerald-400 shrink-0" />
+                  <div>
+                    <div className="font-semibold text-white">New Project</div>
+                    <div className="text-[10px] text-slate-400">Start fresh or open in a new window</div>
+                  </div>
+                </button>
+
+                <div className="h-px bg-stage-border/60 my-1 mx-2" />
+
+                <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Backup & Restore
                 </div>
                 <button
                   type="button"
@@ -253,34 +331,51 @@ export const App: React.FC = () => {
           </div>
         </div>
 
-        <div className="flex items-center gap-3" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
+        <div className="flex items-center gap-2" style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}>
           {/* Dynamic Display Indicator */}
-          <div
-            className={`hidden md:flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs ${
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(true)}
+            title={
               targetExternal
-                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300'
-                : 'border-amber-500/35 bg-amber-500/10 text-amber-200'
+                ? `Audience Display: ${targetExternal.label} (${targetExternal.bounds.width}×${targetExternal.bounds.height})`
+                : 'Audience Output: Single Display (16:9 Floating Preview Fallback)'
+            }
+            className={`hidden md:flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs transition-colors cursor-pointer ${
+              targetExternal
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300 hover:border-emerald-400'
+                : 'border-amber-500/35 bg-amber-500/10 text-amber-200 hover:border-amber-400'
             }`}
           >
-            <Monitor className="h-3.5 w-3.5" />
-            {targetExternal
-              ? `Ext: ${targetExternal.label} (${targetExternal.bounds.width}×${targetExternal.bounds.height})`
-              : 'Single Display (16:9 Preview Fallback)'}
-          </div>
+            <Monitor className="h-3.5 w-3.5 shrink-0" />
+            <span className="font-medium truncate max-w-[140px]">
+              {targetExternal ? `Ext: ${targetExternal.label}` : '16:9 Preview'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setGuideModalOpen(true)}
+            title="Presentation & Operations Guide"
+            className="flex items-center gap-1.5 rounded-lg border border-stage-border bg-stage-card px-2.5 py-1 text-xs font-medium text-slate-300 hover:border-amber-500/50 hover:text-white transition-colors cursor-pointer"
+          >
+            <BookOpen className="h-3.5 w-3.5 text-amber-400 shrink-0" />
+            <span className="hidden sm:inline">Guide</span>
+          </button>
 
           <button
             type="button"
             onClick={() => setSettingsOpen(true)}
             title="Stage & Alignment Settings"
-            className="rounded-xl border border-stage-border bg-stage-card p-2 text-slate-300 hover:border-amber-500/50 hover:text-white"
+            className="rounded-lg border border-stage-border bg-stage-card p-1.5 text-slate-300 hover:border-amber-500/50 hover:text-white transition-colors cursor-pointer"
           >
-            <Settings className="h-4 w-4" />
+            <Settings className="h-3.5 w-3.5" />
           </button>
 
           <button
             type="button"
             onClick={handleTogglePresentation}
-            className={`flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold tracking-wide transition-all shadow-lg ${
+            className={`flex items-center gap-1.5 rounded-lg px-3 py-1 text-xs font-bold tracking-wide transition-all shadow-md ${
               isPresenting
                 ? 'bg-rose-500 text-white hover:bg-rose-400'
                 : 'bg-amber-500 text-black hover:bg-amber-400'
@@ -289,12 +384,12 @@ export const App: React.FC = () => {
             {isPresenting ? (
               <>
                 <Square className="h-3.5 w-3.5 fill-current" />
-                Stop Presentation
+                <span>Stop Presentation</span>
               </>
             ) : (
               <>
-                <Presentation className="h-4 w-4" />
-                Start Presentation
+                <Presentation className="h-3.5 w-3.5" />
+                <span>Start Presentation</span>
               </>
             )}
           </button>
@@ -417,6 +512,14 @@ export const App: React.FC = () => {
       {/* Modals */}
       <NewSongModal open={newSongOpen} onClose={() => setNewSongOpen(false)} />
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <PresentationGuideModal
+        open={guideModalOpen}
+        onClose={() => setGuideModalOpen(false)}
+        onNavigate={handleGuideNavigate}
+      />
+      <ImportDestinationModal />
+      <NewProjectConfirmModal />
+      <CloseWindowConfirmModal />
 
       {/* Toast Notification */}
       {toast && (

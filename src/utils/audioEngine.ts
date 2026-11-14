@@ -1,4 +1,8 @@
 import { registerAudioAnalyser } from './audioVisualizerBus';
+import {
+  attachHarmonicAudioElement,
+  getOrCreateMediaElementSource,
+} from './harmonicAudioAnalyzer';
 
 /**
  * Stage Audio Engine for Window 1 (Master Stage Console).
@@ -61,18 +65,23 @@ export class StageAudioEngine {
     this.ctx = new AudioCtx();
     this.gainNode = this.ctx.createGain();
     this.gainNode.gain.value = 1;
-    this.sourceNode = this.ctx.createMediaElementSource(this.audio);
+    this.sourceNode = getOrCreateMediaElementSource(this.ctx, this.audio);
     this.analyserNode = this.ctx.createAnalyser();
-    this.analyserNode.fftSize = 256;
-    this.analyserNode.smoothingTimeConstant = 0.7;
+    this.analyserNode.fftSize = 1024;
+    this.analyserNode.smoothingTimeConstant = 0.8;
     this.sourceNode.connect(this.analyserNode);
     this.analyserNode.connect(this.gainNode);
     this.gainNode.connect(this.ctx.destination);
     registerAudioAnalyser(this.analyserNode);
+    attachHarmonicAudioElement(this.audio, this.ctx);
 
     if (this.currentSinkId) {
       this.applySinkId(this.currentSinkId).catch(() => {});
     }
+  }
+
+  public getAudioElement(): HTMLAudioElement {
+    return this.audio;
   }
 
   private clearFadeTimer(): void {

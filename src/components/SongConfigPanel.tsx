@@ -232,7 +232,12 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setActiveTabFilter('backdrop')}
+              onClick={() => {
+                setActiveTabFilter('backdrop');
+                if (style.musicAnimation && style.musicAnimation !== 'none') {
+                  setPreviewMode('music');
+                }
+              }}
               className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
                 activeTabFilter === 'backdrop'
                   ? 'border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,185,66,0.2)]'
@@ -247,7 +252,10 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
 
             <button
               type="button"
-              onClick={() => setActiveTabFilter('typography')}
+              onClick={() => {
+                setActiveTabFilter('typography');
+                setPreviewMode('lyric');
+              }}
               className={`flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 ${
                 activeTabFilter === 'typography'
                   ? 'border-amber-500/60 bg-amber-500/20 text-amber-300 shadow-[0_0_12px_rgba(245,185,66,0.2)]'
@@ -380,16 +388,16 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                     {(
                       [
                         {
-                          id: 'sacred-waves',
-                          label: 'Harmonic Waves',
-                          desc: 'Dynamic audio spectrum',
-                          icon: Activity,
-                        },
-                        {
                           id: 'lotus-pulse',
                           label: 'Sacred Lotus',
                           desc: 'Golden mandala bloom',
                           icon: Sparkles,
+                        },
+                        {
+                          id: 'sacred-waves',
+                          label: 'Harmonic Waves',
+                          desc: 'Dynamic audio spectrum',
+                          icon: Activity,
                         },
                         {
                           id: 'aurora-orb',
@@ -465,6 +473,78 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                       );
                     })}
                   </div>
+
+                  {/* Instrumental Animation Size / Scale Adjuster */}
+                  {style.musicAnimation && style.musicAnimation !== 'none' && (
+                    <div className="rounded-xl border border-stage-border bg-stage-bg p-3.5 space-y-2.5 mt-2">
+                      <div className="flex items-center justify-between text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-slate-200">Animation Scale (Audience & Preview Size)</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono text-sky-300 font-bold bg-sky-500/10 border border-sky-400/30 px-2 py-0.5 rounded text-xs">
+                            {Math.round((style.musicAnimationScale ?? 1.0) * 100)}% ({((style.musicAnimationScale ?? 1.0)).toFixed(1)}x)
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPreviewMode('music');
+                              updateStyleConfig({ musicAnimationScale: 1.0 });
+                            }}
+                            title="Reset to default 100% scale"
+                            className="rounded p-1 text-slate-500 hover:text-white transition-colors"
+                          >
+                            <RotateCcw className="h-3 w-3" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewMode('music');
+                            const next = Math.max(0.4, Number(((style.musicAnimationScale ?? 1.0) - 0.1).toFixed(2)));
+                            updateStyleConfig({ musicAnimationScale: next });
+                          }}
+                          title="Decrease animation size (-)"
+                          className="flex h-9 items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 text-xs font-bold text-slate-200 hover:text-white hover:border-sky-400/60 active:scale-95 shrink-0 transition-all shadow-sm"
+                        >
+                          <Minus className="h-3.5 w-3.5" />
+                          <span>Size -</span>
+                        </button>
+
+                        <div className="flex-1 relative flex items-center min-w-0">
+                          <input
+                            type="range"
+                            min={0.4}
+                            max={2.5}
+                            step={0.05}
+                            value={style.musicAnimationScale ?? 1.0}
+                            onChange={(e) => {
+                              setPreviewMode('music');
+                              updateStyleConfig({ musicAnimationScale: Number(Number(e.target.value).toFixed(2)) });
+                            }}
+                            className="w-full accent-sky-400 cursor-pointer h-2 bg-slate-700/80 rounded-lg"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPreviewMode('music');
+                            const next = Math.min(2.5, Number(((style.musicAnimationScale ?? 1.0) + 0.1).toFixed(2)));
+                            updateStyleConfig({ musicAnimationScale: next });
+                          }}
+                          title="Increase animation size (+)"
+                          className="flex h-9 items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 text-xs font-bold text-slate-200 hover:text-white hover:border-sky-400/60 active:scale-95 shrink-0 transition-all shadow-sm"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>Size +</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 1-Click Stage Gradients (800ms Crossfade) */}
@@ -618,7 +698,10 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                         </span>
                         <button
                           type="button"
-                          onClick={() => updateStyleConfig({ fontSizeVw: 4.4 })}
+                          onClick={() => {
+                            setPreviewMode('lyric');
+                            updateStyleConfig({ fontSizeVw: 4.4 });
+                          }}
                           title="Reset to standard 4.4 vw"
                           className="rounded p-1 text-slate-500 hover:text-white transition-colors"
                         >
@@ -630,11 +713,12 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                     <div className="flex items-center gap-2.5">
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          setPreviewMode('lyric');
                           updateStyleConfig({
                             fontSizeVw: Math.max(2.0, Number((style.fontSizeVw - 0.2).toFixed(1))),
-                          })
-                        }
+                          });
+                        }}
                         title="Decrease font size (A-)"
                         className="flex h-9 items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 text-xs font-bold text-slate-200 hover:text-white hover:border-amber-400/60 active:scale-95 shrink-0 transition-all shadow-sm"
                       >
@@ -649,20 +733,22 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                           max={9.0}
                           step={0.1}
                           value={style.fontSizeVw}
-                          onChange={(e) =>
-                            updateStyleConfig({ fontSizeVw: Number(Number(e.target.value).toFixed(1)) })
-                          }
+                          onChange={(e) => {
+                            setPreviewMode('lyric');
+                            updateStyleConfig({ fontSizeVw: Number(Number(e.target.value).toFixed(1)) });
+                          }}
                           className="w-full accent-amber-500 cursor-pointer h-2 bg-slate-700/80 rounded-lg"
                         />
                       </div>
 
                       <button
                         type="button"
-                        onClick={() =>
+                        onClick={() => {
+                          setPreviewMode('lyric');
                           updateStyleConfig({
                             fontSizeVw: Math.min(9.0, Number((style.fontSizeVw + 0.2).toFixed(1))),
-                          })
-                        }
+                          });
+                        }}
                         title="Increase font size (A+)"
                         className="flex h-9 items-center gap-1 rounded-xl border border-stage-border bg-stage-card px-2.5 text-xs font-bold text-slate-200 hover:text-white hover:border-amber-400/60 active:scale-95 shrink-0 transition-all shadow-sm"
                       >
@@ -693,7 +779,10 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                           <button
                             key={item.w}
                             type="button"
-                            onClick={() => updateStyleConfig({ fontWeight: item.w as any })}
+                            onClick={() => {
+                              setPreviewMode('lyric');
+                              updateStyleConfig({ fontWeight: item.w as any });
+                            }}
                             title={`${item.full} (${item.num})`}
                             className={`h-9 rounded-xl border text-center transition-all min-w-0 overflow-hidden flex flex-col items-center justify-center cursor-pointer active:scale-95 shadow-sm ${
                               isSelected
@@ -750,12 +839,13 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                         <button
                           key={f.value}
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            setPreviewMode('lyric');
                             updateStyleConfig({
                               fontFamily: f.value,
                               fontAssetPath: undefined,
-                            })
-                          }
+                            });
+                          }}
                           className={`w-full text-left rounded-xl border px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                             selected
                               ? 'border-amber-400 bg-amber-500/20 text-amber-200 font-bold'
@@ -774,12 +864,13 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                         <button
                           key={cf.id}
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            setPreviewMode('lyric');
                             updateStyleConfig({
                               fontFamily: `"${cf.fontFamily}", sans-serif`,
                               fontAssetPath: cf.relativePath,
-                            })
-                          }
+                            });
+                          }}
                           className={`w-full text-left rounded-xl border px-3 py-2 text-xs transition-colors flex items-center justify-between ${
                             selected
                               ? 'border-amber-400 bg-amber-500/20 text-amber-200 font-bold'
@@ -806,12 +897,13 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                         <button
                           key={preset.label}
                           type="button"
-                          onClick={() =>
+                          onClick={() => {
+                            setPreviewMode('lyric');
                             updateStyleConfig({
                               textColor: preset.color,
                               textShadow: preset.shadow,
-                            })
-                          }
+                            });
+                          }}
                           className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
                             selected
                               ? 'border-amber-400 bg-amber-500/20 text-white font-bold ring-1 ring-amber-400/40'
@@ -1034,6 +1126,18 @@ export const SongConfigPanel: React.FC<SongConfigPanelProps> = ({ song, onGoToSt
                       {(style.musicAnimation ?? 'lotus-pulse').replace('-', ' ')}
                     </span>
                   </div>
+
+                  {style.musicAnimation && style.musicAnimation !== 'none' && (
+                    <div className="flex items-center justify-between">
+                      <span className="flex items-center gap-2 min-w-0 truncate">
+                        <CheckCircle2 className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                        <span className="truncate">Animation Scale</span>
+                      </span>
+                      <span className="font-mono font-bold text-sky-300 shrink-0 ml-2">
+                        {Math.round((style.musicAnimationScale ?? 1.0) * 100)}%
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 

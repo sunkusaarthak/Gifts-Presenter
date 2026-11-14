@@ -1,0 +1,135 @@
+name: Build and Release Gifts Presenter
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Installer
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Verify Types and Unit Tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build Windows Installer
+        run: npm run dist:win
+
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-release
+          path: release/Gifts-Presenter-Setup-*.exe
+          if-no-files-found: error
+
+  build-mac:
+    name: Build macOS DMG & ZIP
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Verify Types and Unit Tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build macOS Artifacts (Apple Silicon & Intel)
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        run: npm run dist:mac
+
+      - name: Upload macOS Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-release
+          path: |
+            release/*.dmg
+            release/*.zip
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows, build-mac]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-release
+          path: release-dist
+
+      - name: Download macOS Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: mac-release
+          path: release-dist
+
+      - name: Copy Demo Bhajan Bundle
+        run: |
+          if [ -f "demo-project/Gifts-Demo-Bhajan.zip" ]; then
+            cp demo-project/Gifts-Demo-Bhajan.zip release-dist/
+          fi
+
+      - name: List Release Assets
+        run: ls -la release-dist/
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name || 'v1.0.0' }}
+          name: Gifts Presenter ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag_name || 'v1.0.0' }}
+          body: |
+            ## Gifts Presenter Release
+
+            ### Windows
+            - **`Gifts-Presenter-Setup-1.0.0.exe`**: Full NSIS installer for Windows 10 / 11 (64-bit) with custom installation directory picker and optional shortcut toggles.
+
+            ### macOS (Apple Silicon & Intel)
+            - **`Gifts-Presenter-1.0.0-arm64.dmg`**: Native disk image for Apple Silicon (M1/M2/M3/M4). Drag and drop into Applications.
+            - **`Gifts-Presenter-1.0.0-x64.dmg`**: Native disk image for Intel Macs.
+            - **`Gifts-Presenter-1.0.0-arm64.zip`** & **`Gifts-Presenter-1.0.0-x64.zip`**: Standalone `.app` archives.
+
+            ### Included Bhajan Bundle
+            - **`Gifts-Demo-Bhajan.zip`**: Authentic Prem Rawat devotional bhajans (*गोविंद* and *धागा*) pre-synced with verse-by-verse timings and stage styling.
+          files: release-dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

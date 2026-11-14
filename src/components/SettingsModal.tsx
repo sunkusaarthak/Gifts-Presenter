@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Monitor, ShieldCheck, Sparkles, Volume2, X } from 'lucide-react';
-import { normalizeGeminiModel, type GeminiAlignModel } from '../shared/types';
+import { Monitor, RefreshCw, ShieldCheck, Volume2, X } from 'lucide-react';
 import { usePresenterStore } from '../store/usePresenterStore';
 
 interface SettingsModalProps {
@@ -12,14 +11,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
   const settings = usePresenterStore((s) => s.settings);
   const displays = usePresenterStore((s) => s.displays);
   const saveSettings = usePresenterStore((s) => s.saveSettings);
+  const showToast = usePresenterStore((s) => s.showToast);
 
   const [audioSinkId, setAudioSinkId] = useState(settings.audioSinkId);
   const [preferredDisplayId, setPreferredDisplayId] = useState<number | null>(
     settings.preferredDisplayId,
   );
-  const [geminiApiKey, setGeminiApiKey] = useState(settings.geminiApiKey);
-  const [geminiModel, setGeminiModel] = useState<GeminiAlignModel>(settings.geminiModel);
   const [audioDevices, setAudioDevices] = useState<MediaDeviceInfo[]>([]);
+  const [isRefreshingDisplays, setIsRefreshingDisplays] = useState(false);
+  const [osGuideTab, setOsGuideTab] = useState<'auto' | 'mac' | 'windows'>('auto');
   const [platformInfo, setPlatformInfo] = useState<{
     platform: string;
     userDataDir: string;
@@ -30,8 +30,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
     if (!open) return;
     setAudioSinkId(settings.audioSinkId);
     setPreferredDisplayId(settings.preferredDisplayId);
-    setGeminiApiKey(settings.geminiApiKey ?? '');
-    setGeminiModel(normalizeGeminiModel(settings.geminiModel));
 
     if (navigator.mediaDevices?.enumerateDevices) {
       navigator.mediaDevices
@@ -47,6 +45,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
 
   const externalDisplays = displays.filter((d) => !d.isPrimary);
 
+  const isSystemMac =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPod|iPad/i.test(navigator.userAgent);
+  const effectiveOsTab =
+    osGuideTab === 'auto' ? (isSystemMac ? 'mac' : 'windows') : osGuideTab;
+
+  const handleRefreshDisplays = async () => {
+    setIsRefreshingDisplays(true);
+    try {
+      const list = await window.satsangAPI.getDisplays();
+      usePresenterStore.setState({ displays: list });
+      const ext = list.filter((d) => !d.isPrimary);
+      if (ext.length > 0) {
+        showToast(
+          `Detected ${ext.length} external display(s) ready for presentation!`,
+          'success',
+        );
+      } else {
+        showToast(
+          'Detected 1 display surface. If a projector is connected, change OS mode from Duplicate/Mirror to Extend.',
+          'info',
+        );
+      }
+    } catch (err) {
+      showToast(`Failed to refresh displays: ${(err as Error).message}`, 'error');
+    } finally {
+      setIsRefreshingDisplays(false);
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     await saveSettings({
@@ -54,8 +81,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
       preferredDisplayId,
       elevenLabsApiKey: settings.elevenLabsApiKey || '',
       localAlignerCommand: settings.localAlignerCommand || '',
-      geminiApiKey,
-      geminiModel,
     });
     onClose();
   };
@@ -97,11 +122,98 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
                 </option>
               ))}
             </select>
-            <p className="text-xs text-slate-400">
-              {externalDisplays.length === 0
-                ? 'No external monitor connected: clicking Start Presentation opens a floating 16:9 preview window.'
-                : `Detected ${displays.length} total display(s). External output runs fullscreen, frameless, always-on-top (screen-saver), cursor hidden.`}
-            </p>
+
+            {externalDisplays.length === 0 ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200 space-y-2.5">
+                <div className="font-semibold text-amber-300 flex items-center justify-between">
+                  <span>Single Display Mode (16:9 Floating Preview Active)</span>
+                  <button
+                    type="button"
+                    disabled={isRefreshingDisplays}
+                    onClick={handleRefreshDisplays}
+                    className="flex items-center gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/20 px-2.5 py-1 text-[11px] font-semibold text-amber-200 hover:bg-amber-500 hover:text-black transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`h-3 w-3 ${isRefreshingDisplays ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshingDisplays ? 'Scanning...' : 'Refresh Displays'}</span>
+                  </button>
+                </div>
+
+                <p className="text-slate-300 leading-relaxed">
+                  No external secondary display is currently connected. When you click <strong>Start Presentation</strong>, Gifts Presenter will open an aspect-ratio-locked floating 16:9 preview window on this screen so you can test and rehearse without a projector.
+                </p>
+
+                {/* Connecting an External Projector Guidance */}
+                <div className="pt-2 border-t border-amber-500/20 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-white">To present on a Projector, TV, or LED Wall:</span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setOsGuideTab('windows')}
+                        className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
+                          effectiveOsTab === 'windows'
+                            ? 'bg-amber-400 text-black shadow-sm'
+                            : 'bg-white/10 text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        Windows
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setOsGuideTab('mac')}
+                        className={`px-2.5 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
+                          effectiveOsTab === 'mac'
+                            ? 'bg-amber-400 text-black shadow-sm'
+                            : 'bg-white/10 text-slate-300 hover:text-white'
+                        }`}
+                      >
+                        macOS
+                      </button>
+                    </div>
+                  </div>
+
+                  {effectiveOsTab === 'mac' ? (
+                    <div className="space-y-1.5 text-slate-300">
+                      <p className="leading-relaxed">
+                        1. Connect your HDMI, USB-C, or AirPlay projector to your Mac.
+                      </p>
+                      <p className="leading-relaxed">
+                        2. If macOS defaults to mirroring your laptop, switch it to <strong>Extended display</strong>:
+                      </p>
+                      <div className="rounded-lg bg-black/50 p-2 font-mono text-[11px] text-amber-300 border border-amber-500/30">
+                        Apple  menu &gt; System Settings &gt; Displays &gt; Select external screen &gt; <strong>Use as: &ldquo;Extended display&rdquo;</strong>
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        Quick shortcut: Click Control Center (top-right menu bar) &gt; Screen Mirroring &gt; select <strong>Extended Display</strong> (uncheck Mirror).
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5 text-slate-300">
+                      <p className="leading-relaxed">
+                        1. Connect your HDMI, DisplayPort, or USB-C cable to the projector.
+                      </p>
+                      <p className="leading-relaxed">
+                        2. Ensure Windows is set to <strong>Extend</strong> (if set to &ldquo;Duplicate&rdquo;, Windows combines both screens into one):
+                      </p>
+                      <div className="rounded-lg bg-black/50 p-2 font-mono text-[11px] text-amber-300 border border-amber-500/30">
+                        Press <strong>Win + P</strong> on your keyboard &rarr; Select <strong>&ldquo;Extend&rdquo;</strong>
+                      </div>
+                      <p className="text-slate-400 text-[11px]">
+                        Or in Windows Settings &gt; System &gt; Display, change the dropdown from &ldquo;Duplicate these displays&rdquo; to <strong>&ldquo;Extend these displays&rdquo;</strong>.
+                      </p>
+                    </div>
+                  )}
+
+                  <p className="text-[11px] text-slate-400 pt-0.5">
+                    After connecting or switching to Extend, click <strong>Refresh Displays</strong> above and Gifts Presenter will detect your external screen immediately.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">
+                Detected {displays.length} total display(s). External output will run fullscreen, frameless, and always-on-top on your selected display.
+              </p>
+            )}
           </div>
 
           {/* Audio Output Device */}
@@ -122,35 +234,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ open, onClose }) =
                 </option>
               ))}
             </select>
-          </div>
-
-          {/* Gemini Audio Alignment */}
-          <div className="space-y-3 rounded-xl border border-amber-500/30 bg-stage-bg p-4">
-            <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-300">
-              <Sparkles className="h-4 w-4" />
-              Gemini Precision Audio-to-Lyric Aligner (Sync Studio)
-            </label>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <input
-                type="password"
-                value={geminiApiKey}
-                onChange={(e) => setGeminiApiKey(e.target.value)}
-                placeholder="Gemini API Key (AIza...)"
-                className="sm:col-span-2 rounded-xl border border-stage-border bg-stage-panel px-3 py-2 font-mono text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-              />
-              <select
-                value={geminiModel}
-                onChange={(e) => setGeminiModel(e.target.value as GeminiAlignModel)}
-                className="rounded-xl border border-stage-border bg-stage-panel px-2.5 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
-              >
-                <option value="gemini-3.8-flash">gemini-3.8-flash (Recommended)</option>
-                <option value="gemini-3.8-pro">gemini-3.8-pro (Highest Precision)</option>
-                <option value="gemini-3.8-flash-lite">gemini-3.8-flash-lite</option>
-              </select>
-            </div>
-            <p className="text-[11px] text-slate-400">
-              Used only in Sync Studio to generate precise timecodes; live stage playback remains 100% offline.
-            </p>
           </div>
 
           {/* Stage Safety Diagnostics */}

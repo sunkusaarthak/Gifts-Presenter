@@ -22,6 +22,8 @@ import {
   DEFAULT_STYLE_CONFIG,
   toMediaUrl,
   type PresentationPayload,
+  type StyleConfig,
+  type SyncedLine,
 } from '../shared/types';
 import { usePresenterStore } from '../store/usePresenterStore';
 import { useUIStore } from '../store/useUIStore';
@@ -34,6 +36,125 @@ function formatClock(sec: number): string {
   const s = Math.floor(sec % 60);
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
+
+interface ProjectorMirrorProps {
+  currentLine: SyncedLine | null;
+  styleConfig: StyleConfig;
+  isBlank: boolean;
+  isMusicInterlude: boolean;
+  className?: string;
+}
+
+interface PrompterLineProgressBarProps {
+  engineRef: React.RefObject<StageAudioEngine | null>;
+  startTime: number;
+  endTime: number;
+  isPlaying: boolean;
+  glow?: boolean;
+  heightClass?: string;
+}
+
+const PrompterLineProgressBar: React.FC<PrompterLineProgressBarProps> = React.memo(
+  ({ engineRef, startTime, endTime, isPlaying, glow = false, heightClass = 'h-1.5' }) => {
+    const barRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      let animId = 0;
+      const duration = Math.max(0.1, endTime - startTime);
+
+      const update = () => {
+        const engine = engineRef.current;
+        if (engine && barRef.current) {
+          const t = engine.getCurrentTime();
+          const pct = Math.min(100, Math.max(0, ((t - startTime) / duration) * 100));
+          barRef.current.style.width = `${pct}%`;
+        }
+        if (isPlaying) {
+          animId = requestAnimationFrame(update);
+        }
+      };
+
+      update();
+      if (isPlaying) {
+        animId = requestAnimationFrame(update);
+      }
+      return () => {
+        if (animId) cancelAnimationFrame(animId);
+      };
+    }, [engineRef, startTime, endTime, isPlaying]);
+
+    return (
+      <div className={`w-full bg-white/5 ${heightClass} rounded-full overflow-hidden`}>
+        <div
+          ref={barRef}
+          className={`bg-amber-400 h-full rounded-full ${
+            glow ? 'shadow-[0_0_8px_rgba(245,185,66,0.6)]' : ''
+          }`}
+          style={{ width: '0%', willChange: 'width' }}
+        />
+      </div>
+    );
+  },
+);
+
+const ProjectorMirror: React.FC<ProjectorMirrorProps> = React.memo(({
+  currentLine,
+  styleConfig,
+  isBlank,
+  isMusicInterlude,
+  className = '',
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [dims, setDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const update = () => {
+      const cw = el.clientWidth;
+      const ch = el.clientHeight;
+      if (cw <= 0 || ch <= 0) return;
+      const targetRatio = 16 / 9;
+      let w = cw;
+      let h = w / targetRatio;
+      if (h > ch) {
+        h = ch;
+        w = h * targetRatio;
+      }
+      setDims({ width: Math.floor(w), height: Math.floor(h) });
+    };
+
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  return (
+    <div
+      ref={containerRef}
+      className={`flex-1 min-h-0 min-w-0 flex items-center justify-center p-1 overflow-hidden ${className}`}
+    >
+      <div
+        className="relative rounded-xl overflow-hidden border border-white/10 bg-black shadow-2xl shrink-0"
+        style={{
+          width: dims.width > 0 ? `${dims.width}px` : '100%',
+          height: dims.height > 0 ? `${dims.height}px` : 'auto',
+          aspectRatio: '16 / 9',
+        }}
+      >
+        <SlideRenderer
+          activeLine={currentLine}
+          styleConfig={styleConfig}
+          isBlank={isBlank}
+          isMusicInterlude={isMusicInterlude}
+          isPreview={true}
+        />
+      </div>
+    </div>
+  );
+});
 
 export const StagePresenter: React.FC = () => {
   const songs = usePresenterStore((s) => s.songs);
@@ -89,12 +210,15 @@ export const StagePresenter: React.FC = () => {
 
   const engineRef = useRef<StageAudioEngine | null>(null);
   const lastEmittedSigRef = useRef<string>('');
+  const lastClockSecRef = useRef<number>(-1);
 
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [activeLineIndex, setActiveLineIndex] = useState<number>(-1);
   const [isMusicInterlude, setIsMusicInterlude] = useState<boolean>(true);
 
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
   const activeSongRef = useRef(activeSong);
   activeSongRef.current = activeSong;
   const activeLineIdxRef = useRef(activeLineIndex);
@@ -133,14 +257,16 @@ export const StagePresenter: React.FC = () => {
   const emitPresentationIfChanged = useCallback((force = false) => {
     const song = activeSongRef.current;
     const idx = activeLineIdxRef.current;
-    const effectiveInterlude = isMusicInterludeRef.current;
-    const line = !effectiveInterlude && song && idx >= 0 ? song.syncedLines[idx] ?? null : null;
+    const isPlaying = isPlayingRef.current;
+    const isInterlude = isMusicInterludeRef.current;
+    const line = !isInterlude && song && idx >= 0 ? song.syncedLines[idx] ?? null : null;
     const styleConfig = song?.styleConfig ?? DEFAULT_STYLE_CONFIG;
 
     const sig = JSON.stringify({
       isPresenting: isPresentingRef.current,
       isBlank: isBlankRef.current,
-      isMusicInterlude: effectiveInterlude,
+      isMusicInterlude: isInterlude,
+      isPlaying,
       songId: song?.id ?? null,
       lineId: line?.id ?? null,
       lineText: line?.text ?? null,
@@ -153,7 +279,8 @@ export const StagePresenter: React.FC = () => {
     const payload: PresentationPayload = {
       isPresenting: isPresentingRef.current,
       isBlank: isBlankRef.current,
-      isMusicInterlude: effectiveInterlude,
+      isMusicInterlude: isInterlude,
+      isPlaying,
       songId: song?.id ?? null,
       songTitle: song?.title ?? '',
       activeLine: line,
@@ -172,11 +299,15 @@ export const StagePresenter: React.FC = () => {
     engine.onEnded = () => {
       // Stage rule: NEVER auto-advance to next song when a track finishes.
       setIsPlaying(false);
+      isPlayingRef.current = false;
+      emitPresentationIfChanged(true);
     };
 
     engine.onError = (msg) => {
       setIsPlaying(false);
-      showToast(msg, 'error');
+      isPlayingRef.current = false;
+      emitPresentationIfChanged(true);
+      showToast(`Stage audio error: ${msg}`, 'error');
     };
 
     if (settings.audioSinkId) {
@@ -201,6 +332,7 @@ export const StagePresenter: React.FC = () => {
     const engine = engineRef.current;
     if (!engine) return;
     setIsPlaying(false);
+    lastClockSecRef.current = 0;
     setCurrentTime(0);
     setActiveLineIndex(-1);
     activeLineIdxRef.current = -1;
@@ -222,6 +354,7 @@ export const StagePresenter: React.FC = () => {
   }, [activeSong?.styleConfig, isBlank, isMusicInterlude, isPresenting, emitPresentationIfChanged]);
 
   // Zero-latency 60fps rAF O(log N) binary search sync loop driving Window 2 & Console
+  // Time state updates are throttled to 1Hz (whole seconds) so React does not re-render the 1000-line tree at 60fps
   useEffect(() => {
     let rafId = 0;
 
@@ -233,7 +366,12 @@ export const StagePresenter: React.FC = () => {
         const isPaused = engine.isPaused();
         if (!isPaused) {
           const t = engine.getCurrentTime();
-          setCurrentTime(t);
+          const sec = Math.floor(t);
+          if (sec !== lastClockSecRef.current) {
+            lastClockSecRef.current = sec;
+            setCurrentTime(sec);
+          }
+
           const effectiveTime = t + (song.globalOffsetSeconds ?? 0);
           const resolved = resolveStageDisplayState(song.syncedLines, effectiveTime);
 
@@ -257,26 +395,6 @@ export const StagePresenter: React.FC = () => {
     return () => window.cancelAnimationFrame(rafId);
   }, [emitPresentationIfChanged]);
 
-  // Heartbeat sync ensures Window 2 reflects immediately when presentation starts
-  useEffect(() => {
-    if (!isPresenting) return;
-    const timer = window.setInterval(() => {
-      const engine = engineRef.current;
-      const song = activeSongRef.current;
-      if (engine && song && !engine.isPaused()) {
-        const t = engine.getCurrentTime();
-        const effectiveTime = t + (song.globalOffsetSeconds ?? 0);
-        const resolved = resolveStageDisplayState(song.syncedLines, effectiveTime);
-        activeLineIdxRef.current = resolved.activeLineIndex;
-        isMusicInterludeRef.current = resolved.isMusicInterlude;
-        setActiveLineIndex(resolved.activeLineIndex);
-        setIsMusicInterlude(resolved.isMusicInterlude);
-        emitPresentationIfChanged(false);
-      }
-    }, 350);
-    return () => window.clearInterval(timer);
-  }, [isPresenting, emitPresentationIfChanged]);
-
   const handleTogglePlayPause = useCallback(async () => {
     const engine = engineRef.current;
     const song = activeSongRef.current;
@@ -284,15 +402,22 @@ export const StagePresenter: React.FC = () => {
 
     if (engine.isPlayingOrResuming()) {
       setIsPlaying(false);
+      isPlayingRef.current = false;
       engine.pauseWithFadeOut(() => {
         setIsPlaying(false);
+        isPlayingRef.current = false;
+        emitPresentationIfChanged(true);
       });
+      emitPresentationIfChanged(true);
     } else {
       try {
         setIsPlaying(true);
+        isPlayingRef.current = true;
         await engine.playWithFadeIn();
         const t = engine.getCurrentTime();
-        setCurrentTime(t);
+        const sec = Math.floor(t);
+        lastClockSecRef.current = sec;
+        setCurrentTime(sec);
         const effectiveTime = t + (song.globalOffsetSeconds ?? 0);
         const resolved = resolveStageDisplayState(song.syncedLines, effectiveTime);
         activeLineIdxRef.current = resolved.activeLineIndex;
@@ -303,6 +428,7 @@ export const StagePresenter: React.FC = () => {
         emitPresentationIfChanged(true);
       } catch (err) {
         setIsPlaying(false);
+        isPlayingRef.current = false;
         showToast(`Playback failed: ${(err as Error).message}`, 'error');
       }
     }
@@ -317,7 +443,9 @@ export const StagePresenter: React.FC = () => {
       if (!target) return;
 
       engine.seek(target.startTime);
-      setCurrentTime(target.startTime);
+      const sec = Math.floor(target.startTime);
+      lastClockSecRef.current = sec;
+      setCurrentTime(sec);
       if (engine.isPaused()) {
         engine.playWithFadeIn().catch(() => { });
         setIsPlaying(true);
@@ -659,22 +787,13 @@ export const StagePresenter: React.FC = () => {
                         )}
                       </div>
                       {currentLine && isPlaying && (
-                        <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
-                          <div
-                            className="bg-amber-400 h-full transition-all duration-75 rounded-full shadow-[0_0_8px_rgba(245,185,66,0.6)]"
-                            style={{
-                              width: `${Math.min(
-                                100,
-                                Math.max(
-                                  0,
-                                  ((currentTime - currentLine.startTime) /
-                                    Math.max(0.1, currentLine.endTime - currentLine.startTime)) *
-                                    100,
-                                ),
-                              )}%`,
-                            }}
-                          />
-                        </div>
+                        <PrompterLineProgressBar
+                          engineRef={engineRef}
+                          startTime={currentLine.startTime}
+                          endTime={currentLine.endTime}
+                          isPlaying={isPlaying}
+                          glow={true}
+                        />
                       )}
                     </div>
                   </div>
@@ -723,37 +842,24 @@ export const StagePresenter: React.FC = () => {
 
                 {/* Right: LIVE 16:9 AUDIENCE OUTPUT MIRROR */}
                 <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full rounded-2xl border border-stage-border bg-[#090b10] p-3 shadow-xl overflow-hidden justify-between">
-                  <div className="flex items-center justify-between pb-2 border-b border-stage-border/60 shrink-0">
+                  <div className="flex items-center justify-between pb-2 border-b border-stage-border/60 shrink-0 gap-2">
                     <span className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-300 truncate">
                       <Tv className="h-3.5 w-3.5 text-amber-400 shrink-0" />
                       <span className="truncate">Live 16:9 Projector Mirror</span>
                     </span>
-                    <span className="text-[10px] text-slate-500 font-mono uppercase tracking-wider bg-black/40 px-2 py-0.5 rounded border border-stage-border shrink-0">
-                      {activeSong?.styleConfig.musicAnimation || 'lotus-pulse'}
+
+                    <span className="font-mono text-[10px] text-slate-400 uppercase tracking-wider shrink-0 bg-white/5 px-2 py-0.5 rounded-md border border-white/10">
+                      {activeSong?.styleConfig?.musicAnimation ?? 'lotus-pulse'}
                     </span>
                   </div>
 
                   {/* 16:9 Screen Fit Viewport */}
-                  <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center p-1 overflow-hidden">
-                    <div
-                      className="relative rounded-xl overflow-hidden border border-white/10 bg-black shadow-2xl"
-                      style={{
-                        aspectRatio: '16 / 9',
-                        maxHeight: '100%',
-                        maxWidth: '100%',
-                        height: 'auto',
-                        width: 'auto',
-                      }}
-                    >
-                      <SlideRenderer
-                        activeLine={currentLine}
-                        styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
-                        isBlank={isBlank}
-                        isMusicInterlude={isMusicInterlude}
-                        isPreview={true}
-                      />
-                    </div>
-                  </div>
+                  <ProjectorMirror
+                    currentLine={currentLine}
+                    styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
+                    isBlank={isBlank}
+                    isMusicInterlude={isMusicInterlude}
+                  />
 
                   {/* Forward Situational Queue */}
                   {upcomingQueue.length > 0 && (
@@ -820,22 +926,14 @@ export const StagePresenter: React.FC = () => {
                       )}
                     </div>
                     {currentLine && isPlaying && (
-                      <div className="w-full bg-white/5 h-2 rounded-full overflow-hidden">
-                        <div
-                          className="bg-amber-400 h-full transition-all duration-75 rounded-full"
-                          style={{
-                            width: `${Math.min(
-                              100,
-                              Math.max(
-                                0,
-                                ((currentTime - currentLine.startTime) /
-                                  Math.max(0.1, currentLine.endTime - currentLine.startTime)) *
-                                  100,
-                              ),
-                            )}%`,
-                          }}
-                        />
-                      </div>
+                      <PrompterLineProgressBar
+                        engineRef={engineRef}
+                        startTime={currentLine.startTime}
+                        endTime={currentLine.endTime}
+                        isPlaying={isPlaying}
+                        glow={false}
+                        heightClass="h-2"
+                      />
                     )}
                   </div>
                 </div>
@@ -887,25 +985,13 @@ export const StagePresenter: React.FC = () => {
             ) : (
               /* Mirror Focus: Maximized 16:9 Output Screen */
               <div className="h-full w-full flex flex-col gap-2.5 min-h-0 min-w-0 overflow-hidden">
-                <div className="flex-1 min-h-0 min-w-0 flex items-center justify-center p-2 rounded-2xl border border-stage-border bg-[#090b10] overflow-hidden">
-                  <div
-                    className="relative rounded-2xl overflow-hidden border border-white/10 bg-black shadow-2xl"
-                    style={{
-                      aspectRatio: '16 / 9',
-                      maxHeight: '100%',
-                      maxWidth: '100%',
-                      height: 'auto',
-                      width: 'auto',
-                    }}
-                  >
-                    <SlideRenderer
-                      activeLine={currentLine}
-                      styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
-                      isBlank={isBlank}
-                      isMusicInterlude={isMusicInterlude}
-                      isPreview={true}
-                    />
-                  </div>
+                <div className="flex-1 min-h-0 min-w-0 flex flex-col p-2 rounded-2xl border border-stage-border bg-[#090b10] overflow-hidden">
+                  <ProjectorMirror
+                    currentLine={currentLine}
+                    styleConfig={activeSong?.styleConfig ?? DEFAULT_STYLE_CONFIG}
+                    isBlank={isBlank}
+                    isMusicInterlude={isMusicInterlude}
+                  />
                 </div>
 
                 {/* Bottom Compact Prompter Strip */}

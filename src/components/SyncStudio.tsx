@@ -43,28 +43,22 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
-import {
-  buildLinesFromGeminiAlignments,
-  refineLinesWithVocalOnsets,
-} from '../shared/aligner';
 import { normalizeSyncedLines, resolveStageDisplayState } from '../shared/binarySearch';
 import { reconcileSyncedLinesWithRawLyrics } from '../shared/reconcileLyrics';
 import { parseLrc, serializeLrc, serializeSrt, serializeVtt, splitRawLyrics } from '../shared/lrc';
 import {
   DEFAULT_STYLE_CONFIG,
-  normalizeGeminiModel,
   toMediaUrl,
-  type GeminiAlignModel,
   type SyncedLine,
 } from '../shared/types';
 import { usePresenterStore } from '../store/usePresenterStore';
 import { useUIStore } from '../store/useUIStore';
+import appLogo from '../assets/logo.webp';
 import {
   analyzeSongAudio,
   runOfflineVocalOnsetAlignment,
   type AnalyzedAudioData,
 } from '../utils/waveformAnalysis';
-import { runGeminiAudioAlignmentFallback } from '../utils/geminiFallback';
 import { runWhisperAlignment, type WhisperProgressEvent } from '../utils/whisperController';
 import { SlideRenderer } from './SlideRenderer';
 import { SongConfigPanel } from './SongConfigPanel';
@@ -154,8 +148,6 @@ interface SyncStudioProps {
 export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
   const songs = usePresenterStore((s) => s.songs);
   const activeSongId = usePresenterStore((s) => s.activeSongId);
-  const settings = usePresenterStore((s) => s.settings);
-  const saveSettings = usePresenterStore((s) => s.saveSettings);
   const updateSyncedLines = usePresenterStore((s) => s.updateSyncedLines);
   const saveSong = usePresenterStore((s) => s.saveSong);
   const flushSaveActiveSong = usePresenterStore((s) => s.flushSaveActiveSong);
@@ -283,18 +275,6 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
   const [isWhisperAligning, setIsWhisperAligning] = useState(false);
   const [whisperProgress, setWhisperProgress] = useState<WhisperProgressEvent | null>(null);
   const whisperAbortControllerRef = useRef<AbortController | null>(null);
-
-  const [showGeminiModal, setShowGeminiModal] = useState(false);
-  const [geminiKeyDraft, setGeminiKeyDraft] = useState(settings.geminiApiKey ?? '');
-  const [geminiModelDraft, setGeminiModelDraft] = useState<GeminiAlignModel>(
-    normalizeGeminiModel(settings.geminiModel),
-  );
-  const [geminiSnapOnsets, setGeminiSnapOnsets] = useState(true);
-
-  useEffect(() => {
-    setGeminiKeyDraft(settings.geminiApiKey ?? '');
-    setGeminiModelDraft(normalizeGeminiModel(settings.geminiModel));
-  }, [settings.geminiApiKey, settings.geminiModel]);
 
   const activeSongRef = useRef(activeSong);
   activeSongRef.current = activeSong;
@@ -1371,7 +1351,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
           <div className="space-y-3">
             <div className="inline-flex p-3 rounded-2xl bg-amber-500/10 border border-amber-500/30 shadow-[0_0_30px_rgba(245,185,66,0.12)]">
               <img
-                src="/logo.webp"
+                src={appLogo}
                 alt="Gifts Presenter Logo"
                 className="h-14 w-14 rounded-xl object-cover shadow"
               />
@@ -1536,70 +1516,6 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
       );
     } catch (err) {
       showToast(`Offline alignment failed: ${(err as Error).message}`, 'error');
-    } finally {
-      setIsAligning(false);
-    }
-  };
-
-  const handleRunGeminiAlign = async () => {
-    const lyricsSource = rawDraft.trim() ? rawDraft : activeSong.rawLyrics;
-    if (!splitRawLyrics(lyricsSource).length) {
-      showToast('Add lyric lines before running Gemini Audio Alignment.', 'error');
-      return;
-    }
-    const apiKey = geminiKeyDraft.trim();
-    if (!apiKey) {
-      showToast('Enter your Gemini API key first.', 'error');
-      return;
-    }
-
-    if (apiKey !== settings.geminiApiKey || geminiModelDraft !== settings.geminiModel) {
-      await saveSettings({
-        ...settings,
-        geminiApiKey: apiKey,
-        geminiModel: geminiModelDraft,
-      });
-    }
-
-    setShowGeminiModal(false);
-    setIsAligning(true);
-    try {
-      const dur = wsDuration || activeSong.duration || 0;
-      const alignParams = {
-        audioRelativePath: activeSong.audioPath,
-        rawLyrics: lyricsSource,
-        durationSec: dur,
-        apiKey,
-        model: geminiModelDraft,
-      };
-      const alignments =
-        typeof window.satsangAPI?.runGeminiAudioAlignment === 'function'
-          ? await window.satsangAPI.runGeminiAudioAlignment(alignParams)
-          : await runGeminiAudioAlignmentFallback(alignParams);
-
-      let synced = buildLinesFromGeminiAlignments(lyricsSource, alignments, dur || undefined);
-
-      if (geminiSnapOnsets) {
-        const analysis = analyzedData ?? (await analyzeSongAudio(activeSong.audioPath));
-        setAnalyzedData(analysis);
-        synced = refineLinesWithVocalOnsets(
-          synced,
-          analysis.vocalMono,
-          analysis.sampleRate,
-          0.25,
-          analysis.duration,
-        );
-      }
-
-      applyDraftLinesAndRefreshRegions(synced);
-      setIsEditingUnlocked(true);
-      isEditingUnlockedRef.current = true;
-      showToast(
-        `Gemini (${geminiModelDraft}) aligned ${synced.length} lines. Audition and click "Save Verified Sync" to commit.`,
-        'success',
-      );
-    } catch (err) {
-      showToast((err as Error).message, 'error');
     } finally {
       setIsAligning(false);
     }
@@ -2934,7 +2850,7 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
                       setShowAutoMenu(false);
                       setShowWhisperModal(true);
                     }}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-emerald-300 hover:bg-emerald-500/15"
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-emerald-300 hover:bg-emerald-500/15 transition-colors"
                   >
                     <Sparkles className="h-4 w-4 text-emerald-400 shrink-0" />
                     <div>
@@ -2949,28 +2865,17 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
                     type="button"
                     onClick={() => {
                       setShowAutoMenu(false);
-                      setShowGeminiModal(true);
-                    }}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-amber-200 hover:bg-amber-500/15"
-                  >
-                    <Sparkles className="h-4 w-4 text-amber-400 shrink-0" />
-                    <div>
-                      <div className="font-medium">Gemini Audio Precision Sync</div>
-                      <div className="text-[10px] text-slate-400">Cloud API Model</div>
-                    </div>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowAutoMenu(false);
                       handleRunOfflineDpAlign();
                     }}
-                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-400 hover:bg-white/5"
+                    className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-xs font-medium text-slate-200 hover:bg-white/10 transition-colors"
                   >
-                    <Activity className="h-4 w-4 text-slate-500 shrink-0" />
+                    <Activity className="h-4 w-4 text-emerald-400 shrink-0" />
                     <div>
-                      <div className="font-medium">Offline Vocal-Onset DP</div>
-                      <div className="text-[10px] text-slate-500">Heuristic Energy Envelope</div>
+                      <div className="font-bold flex items-center gap-1.5">
+                        <span className="text-white">Offline Vocal-Onset DP</span>
+                        <span className="rounded bg-emerald-500/20 text-[9px] px-1 py-0.2 font-mono text-emerald-300">100% Free</span>
+                      </div>
+                      <div className="text-[10px] text-slate-400">Heuristic Energy Envelope • Offline DSP</div>
                     </div>
                   </button>
                 </div>
@@ -3704,85 +3609,6 @@ export const SyncStudio: React.FC<SyncStudioProps> = ({ onNewSong }) => {
                 </div>
               </div>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Gemini Precision Audio Alignment Modal */}
-      {showGeminiModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-amber-500/40 bg-stage-panel p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center gap-2 text-amber-300">
-              <Sparkles className="h-5 w-5" />
-              <h3 className="text-base font-semibold text-white">
-                Gemini Precision Audio-to-Lyric Alignment
-              </h3>
-            </div>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Uploads this track to Gemini Audio to determine exact vocal start/end seconds for
-              every lyric line, then optionally snaps boundaries to the nearest 300–3400Hz vocal
-              onset. Results are saved offline as deterministic timecodes for live stage playback.
-            </p>
-
-            <div className="space-y-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Gemini API Key
-                </label>
-                <input
-                  type="password"
-                  value={geminiKeyDraft}
-                  onChange={(e) => setGeminiKeyDraft(e.target.value)}
-                  placeholder="AIza..."
-                  className="w-full rounded-xl border border-stage-border bg-stage-bg px-3 py-2 font-mono text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1">
-                  Gemini Model
-                </label>
-                <select
-                  value={geminiModelDraft}
-                  onChange={(e) => setGeminiModelDraft(e.target.value as GeminiAlignModel)}
-                  className="w-full rounded-xl border border-stage-border bg-stage-bg px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                >
-                  <option value="gemini-3.8-flash">gemini-3.8-flash (Recommended — Fast & Accurate)</option>
-                  <option value="gemini-3.8-pro">gemini-3.8-pro (Highest Precision for Complex Tracks)</option>
-                  <option value="gemini-3.8-flash-lite">gemini-3.8-flash-lite</option>
-                </select>
-              </div>
-
-              <label className="flex items-center gap-2.5 rounded-xl border border-stage-border bg-stage-bg px-3 py-2.5 text-xs text-slate-200 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={geminiSnapOnsets}
-                  onChange={(e) => setGeminiSnapOnsets(e.target.checked)}
-                  className="accent-amber-500"
-                />
-                <span>
-                  Refine with 300–3400Hz DSP vocal-onset snap (±250ms sample-accurate attack)
-                </span>
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2.5 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowGeminiModal(false)}
-                className="rounded-xl border border-stage-border px-4 py-2 text-xs font-medium text-slate-300 hover:bg-white/5"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!geminiKeyDraft.trim()}
-                onClick={handleRunGeminiAlign}
-                className="rounded-xl bg-amber-500 px-5 py-2 text-xs font-semibold text-black hover:bg-amber-400 disabled:opacity-40"
-              >
-                Run Precision Alignment
-              </button>
-            </div>
           </div>
         </div>
       )}

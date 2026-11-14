@@ -1,5 +1,14 @@
 export type BackgroundType = 'image' | 'video' | 'gradient';
 export type MusicAnimationStyle = 'lotus-pulse' | 'sacred-waves' | 'aurora-orb' | 'none';
+export type HarmonicWavesPlacement = 'bottom-dock' | 'behind-center' | 'below-lyric';
+
+export interface VisualizerTick {
+  isPlaying: boolean;
+  bass: number;    // 0.0 to 1.0 (60Hz–250Hz)
+  lowMid: number;  // 0.0 to 1.0 (250Hz–800Hz)
+  vocal: number;   // 0.0 to 1.0 (800Hz–3500Hz)
+  treble: number;  // 0.0 to 1.0 (3500Hz–10000Hz)
+}
 
 export interface SyncedLine {
   id: string;
@@ -21,6 +30,9 @@ export interface StyleConfig {
   textColor: string;
   textShadow: string;
   musicAnimation?: MusicAnimationStyle;
+  musicAnimationScale?: number; // 0.4 to 2.5, default 1.0
+  harmonicWavesEnabled?: boolean;
+  harmonicWavesPlacement?: HarmonicWavesPlacement;
 }
 
 export interface SongPackage {
@@ -48,6 +60,7 @@ export interface DisplayInfo {
 export interface PresentationPayload {
   isPresenting: boolean;
   isBlank: boolean;
+  isPlaying?: boolean;
   isMusicInterlude?: boolean;
   songId: string | null;
   songTitle: string;
@@ -64,46 +77,19 @@ export interface MediaAsset {
   fontFamily?: string;
 }
 
-export type GeminiAlignModel =
-  | 'gemini-3.8-flash'
-  | 'gemini-3.8-pro'
-  | 'gemini-3.8-flash-lite'
-  | (string & {});
-
-export function normalizeGeminiModel(model?: string): string {
-  if (
-    !model ||
-    model === 'gemini-2.5-flash' ||
-    model === 'gemini-2.0-flash' ||
-    model === 'gemini-1.5-flash'
-  ) {
-    return 'gemini-3.8-flash';
-  }
-  if (model === 'gemini-2.5-pro' || model === 'gemini-1.5-pro') {
-    return 'gemini-3.8-pro';
-  }
-  return model;
-}
-
 export interface AppSettings {
   audioSinkId: string;
   preferredDisplayId: number | null;
   elevenLabsApiKey: string;
   localAlignerCommand: string;
-  geminiApiKey: string;
-  geminiModel: GeminiAlignModel;
+  geminiApiKey?: string;
+  geminiModel?: string;
 }
 
 export interface AlignedWord {
   word: string;
   start: number;
   end: number;
-}
-
-export interface GeminiAlignedLine {
-  index: number;
-  startSec: number;
-  endSec: number;
 }
 
 export interface GradientPreset {
@@ -186,6 +172,9 @@ export const DEFAULT_STYLE_CONFIG: StyleConfig = {
   textColor: TEXT_COLOR_PRESETS[0].color,
   textShadow: TEXT_COLOR_PRESETS[0].shadow,
   musicAnimation: 'lotus-pulse',
+  musicAnimationScale: 1.0,
+  harmonicWavesEnabled: true,
+  harmonicWavesPlacement: 'bottom-dock',
 };
 
 export function toMediaUrl(relativePath: string): string {
