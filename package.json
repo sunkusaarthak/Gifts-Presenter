@@ -12,10 +12,10 @@
     "build": "npm run build:electron && npm run build:renderer",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "build:mac": "npm run build && electron-builder --mac",
-    "build:win": "npm run build && electron-builder --win",
-    "dist:mac": "npm run build && electron-builder --mac",
-    "dist:win": "npm run build && electron-builder --win"
+    "build:mac": "npm run build && electron-builder --mac -p never",
+    "build:win": "npm run build && electron-builder --win -p never",
+    "dist:mac": "npm run build && electron-builder --mac -p never",
+    "dist:win": "npm run build && electron-builder --win -p never"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.2",
