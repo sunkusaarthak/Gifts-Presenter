@@ -439,10 +439,10 @@ export const PresentationGuideModal: React.FC<PresentationGuideModalProps> = ({
                     </div>
                     <div className="min-w-0">
                       <div className="font-semibold text-white group-hover:text-amber-200 transition-colors">
-                        Discourse Pause: 700ms Audio Fade & Lyric Hold
+                        Smooth Pause: 700ms Audio Fade & Lyric Hold
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        When Pujya Master pauses to speak, tap <kbd className="px-1.5 py-0.5 rounded bg-black border border-white/20 font-mono text-xs text-amber-300">Spacebar</kbd>. Audio fades out smoothly and the active lyric holds on screen.
+                        When pausing to speak between verses, tap <kbd className="px-1.5 py-0.5 rounded bg-black border border-white/20 font-mono text-xs text-amber-300">Spacebar</kbd>. Audio fades out smoothly and the active lyric holds on screen.
                       </p>
                     </div>
                   </div>
@@ -469,7 +469,7 @@ export const PresentationGuideModal: React.FC<PresentationGuideModalProps> = ({
                         Replay Active Verse (Key: R)
                       </div>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        If Pujya Master re-sings or explains a verse, press <kbd className="px-1.5 py-0.5 rounded bg-black border border-white/20 font-mono text-xs text-amber-300">R</kbd> on the stage console to re-cue that verse instantly.
+                        When re-singing or speaking on a verse, press <kbd className="px-1.5 py-0.5 rounded bg-black border border-white/20 font-mono text-xs text-amber-300">R</kbd> on the stage console to re-cue that verse instantly.
                       </p>
                     </div>
                   </div>

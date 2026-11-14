@@ -1,6 +1,5 @@
 # Contributing to Gifts Presenter
-
-Pranam and welcome. Thank you for offering your seva to the development and maintenance of **Gifts Presenter**. This project is dedicated to providing reliable, offline-first presentation software for Pujya Master and the Satsang Production Seva team.
+Pranam. Thank you for offering your support and care to the development and maintenance of **Gifts Presenter**. This project is dedicated to providing reliable, offline-first dual-display presentation software for live music and synchronized lyrics.
 
 To ensure consistency, stage stability, and dignified user experience, all contributors must adhere to the architectural guidelines outlined below.
 
@@ -74,7 +73,7 @@ Songs, presets, and settings are stored locally on disk (`app.getPath('userData'
 To eliminate audio drift, dual-playback echo, and hardware contention, the Web Audio engine and HTML audio elements reside strictly in Window 1 (`StageConsole` / `audioEngine.ts`). Window 2 (`OutputWindow`) is purely a visual receiver that renders slides, animations, and typography based on lightweight IPC state broadcasts. Never instantiate audio contexts inside Window 2.
 
 ### Guardrail 4: Hold-Lyric-on-Pause with 700ms Smooth Audio Fade-Out
-When Pujya Master begins speaking during a bhajan, the operator pauses playback. The audio engine applies an exponential 700ms gain fade-out to prevent abrupt loudspeaker pops. Simultaneously, the audience display must **freeze and hold the active lyric slide in place** rather than clearing or jumping back to an instrumental screen. This allows the audience to contemplate the verse during the discourse.
+When speaking begins during a song, the operator pauses playback. The audio engine applies an exponential 700ms gain fade-out to prevent abrupt loudspeaker pops. Simultaneously, the audience display must **freeze and hold the active lyric slide in place** rather than clearing or jumping back to an instrumental screen. This allows the audience to contemplate the verse without distraction.
 
 ### Guardrail 5: Minimalist Dancing Pill-Bar Indicator During Instrumental Gaps
 During instrumental-only sections (`isPlaying && !activeLyricLine`), when lyrics are not yet active or during interludes, the audience screen renders the selected background and sacred animation or minimalist dancing indicator without obstructing the hall view. When playback pauses during an instrumental passage, the animation smoothly pauses at its current state.
@@ -143,7 +142,7 @@ gh release create v1.0.0 \
   release/Gifts-Presenter-1.0.0-mac-x64.zip \
   demo-project/Gifts-Demo-Bhajan.zip \
   --title "Gifts Presenter v1.0.0" \
-  --notes "Initial broadcast release for Pujya Master and the Satsang Production Seva team. Includes Windows NSIS installer, macOS standalone application packages (Apple Silicon & Intel), and pre-synced devotional bhajan package."
+  --notes "Initial broadcast release. Includes Windows NSIS installer, macOS standalone application packages (Apple Silicon & Intel), and pre-synced devotional bhajan package."
 ```
 
 If you do not have the GitHub CLI installed, you can upload `release/Gifts-Presenter-Setup-1.0.0.exe`, `release/Gifts-Presenter-1.0.0-mac-arm64.zip`, `release/Gifts-Presenter-1.0.0-mac-x64.zip`, and `demo-project/Gifts-Demo-Bhajan.zip` directly through the GitHub web interface under **Releases -> Draft a new release**.
